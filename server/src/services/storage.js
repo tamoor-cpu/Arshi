@@ -46,14 +46,16 @@ function isRemote() { return remote; }
 // Persist a buffer and return a publicly reachable URL.
 // Tries remote object storage when configured; if it's unreachable, falls back
 // to local disk so an upload never hard-fails (logged so it's visible).
+let remoteHealthy = remote; // flips to false after the first R2 failure so we stop retrying
 async function saveBuffer(buffer, { ext = 'bin', contentType = 'application/octet-stream' } = {}) {
   const key = `${uuidv4()}.${String(ext).replace(/^\./, '') || 'bin'}`;
-  if (remote) {
+  if (remote && remoteHealthy) {
     try {
       await s3.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: key, Body: buffer, ContentType: contentType }));
       return `${process.env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
     } catch (err) {
-      console.error('[storage] R2 upload failed — falling back to local disk:', err.code || err.message);
+      remoteHealthy = false;
+      console.error('[storage] R2 unreachable — using local disk for the rest of this run:', err.code || err.message);
     }
   }
   if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });

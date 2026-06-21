@@ -8,6 +8,12 @@ services:
     plan: starter            # always-on; the free tier spins down between requests
     healthCheckPath: /api/v1/health
     autoDeploy: true
+    # Persistent disk for uploaded files (signed PDFs, photos) so they survive
+    # restarts/redeploys without needing external object storage.
+    disk:
+      name: uploads
+      mountPath: /app/server/uploads
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production

@@ -70,6 +70,10 @@ if (PROD && ALLOWED_ORIGINS.length === 0) {
   console.warn('[cors] ALLOWED_ORIGINS is not set — allowing all origins. Set it to your app URL to lock down cross-origin access.');
 }
 
+// Behind a hosting proxy (Render, etc.), trust the first proxy so the rate
+// limiter and req.ip see the real client address instead of the proxy's.
+if (PROD) app.set('trust proxy', 1);
+
 // Socket.io setup — same CORS policy as the API.
 const io = new Server(server, {
   cors: { origin: corsOrigin, methods: ['GET', 'POST'], credentials: true },
