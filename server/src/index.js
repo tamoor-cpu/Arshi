@@ -60,10 +60,14 @@ const PROD = process.env.NODE_ENV === 'production';
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
 function corsOrigin(origin, callback) {
-  if (!origin) return callback(null, true);
-  if (!PROD) return callback(null, true);
+  if (!origin) return callback(null, true);                 // same-origin / curl / mobile
+  if (!PROD) return callback(null, true);                   // permissive in dev
+  if (ALLOWED_ORIGINS.length === 0) return callback(null, true); // not configured yet — don't break the app
   if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-  return callback(new Error('Not allowed by CORS'));
+  return callback(null, false);                             // deny CORS headers, but never throw (no 500)
+}
+if (PROD && ALLOWED_ORIGINS.length === 0) {
+  console.warn('[cors] ALLOWED_ORIGINS is not set — allowing all origins. Set it to your app URL to lock down cross-origin access.');
 }
 
 // Socket.io setup — same CORS policy as the API.
