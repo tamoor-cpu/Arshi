@@ -250,4 +250,31 @@ router.get('/:locationId/checklists/completed', authenticate, requireLocationAcc
   }
 });
 
+// Get a single completed checklist by id
+router.get('/:locationId/checklists/completed/:checklistId', authenticate, requireLocationAccess, async (req, res) => {
+  try {
+    const checklist = await prisma.completedChecklist.findFirst({
+      where: {
+        id: req.params.checklistId,
+        locationId: req.params.locationId,
+      },
+      include: {
+        template: { include: { tasks: { orderBy: { sequence: 'asc' } } } },
+        user: { select: { id: true, firstName: true, lastName: true } },
+        taskResults: {
+          include: { task: { select: { title: true, requiresPhoto: true } } },
+        },
+      },
+    });
+
+    if (!checklist) {
+      return res.status(404).json({ error: 'Checklist not found' });
+    }
+
+    res.json(checklist);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch checklist' });
+  }
+});
+
 module.exports = router;

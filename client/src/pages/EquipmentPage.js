@@ -237,7 +237,7 @@ export default function EquipmentPage() {
           { label: 'Total Equipment', value: equipment.length, dot: 'bg-brand-400' },
           { label: 'Operational', value: equipment.filter((e) => e.status === 'operational').length, dot: 'bg-green-400' },
           { label: 'Offline', value: equipment.filter((e) => e.status === 'out_of_service').length, dot: 'bg-red-400', hint: 'Out of service' },
-          { label: 'Total Downtime', value: '0m', dot: 'bg-purple-400', hint: 'Last 12 months' },
+          { label: 'Down Now', value: equipment.filter((e) => !['operational', 'retired'].includes(e.status)).length, dot: 'bg-purple-400', hint: 'Not currently operational' },
         ].map((s) => (
           <div key={s.label} className="bg-white border border-gray-100 rounded-2xl p-4">
             <div className="flex items-center gap-2">

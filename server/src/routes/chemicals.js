@@ -92,6 +92,47 @@ router.patch('/:locationId/chemicals/:id', authenticate, requireLocationAccess, 
   }
 });
 
+// Log chemical usage — decrements currentLevel by a logged amount (drives auto-reorder)
+router.post('/:locationId/chemicals/:id/usage', authenticate, requireLocationAccess, async (req, res) => {
+  try {
+    const { amount, notes } = req.body;
+    const used = parseFloat(amount);
+    if (amount == null || amount === '' || Number.isNaN(used) || used <= 0) {
+      return res.status(400).json({ error: 'A positive usage amount is required' });
+    }
+
+    const existing = await prisma.chemical.findFirst({
+      where: { id: req.params.id, locationId: req.params.locationId },
+    });
+    if (!existing) return res.status(404).json({ error: 'Chemical not found' });
+
+    const newLevel = Math.max(0, (existing.currentLevel || 0) - used);
+    const chemical = await prisma.chemical.update({
+      where: { id: req.params.id },
+      data: { currentLevel: newLevel },
+    });
+    req.audit('update', 'chemical', chemical.id, { action: 'usage', amount: used, notes: notes || null });
+
+    // Auto-reorder when the tank drops to/below its reorder point
+    if (chemical.reorderPoint != null && chemical.currentLevel <= chemical.reorderPoint) {
+      const refillQty = chemical.tankCapacity ? Math.ceil(chemical.tankCapacity - chemical.currentLevel) : 1;
+      maybeAutoReorder(prisma, {
+        locationId: req.params.locationId,
+        itemName: chemical.name,
+        supplier: chemical.supplier,
+        qty: refillQty,
+        unit: 'gal',
+        costPerUnit: chemical.costPerGallon,
+      });
+    }
+
+    res.json(chemical);
+  } catch (err) {
+    console.error('Log chemical usage error:', err);
+    res.status(500).json({ error: 'Failed to log chemical usage' });
+  }
+});
+
 // Delete chemical
 router.delete('/:locationId/chemicals/:id', authenticate, requireLocationAccess, requireRole('SITE_MANAGER'), async (req, res) => {
   try {

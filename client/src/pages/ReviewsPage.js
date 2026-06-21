@@ -155,7 +155,7 @@ export default function ReviewsPage() {
           <div className="bg-white border border-gray-100 rounded-2xl py-14 text-center">
             <Star className="w-10 h-10 text-gray-200 mx-auto mb-3" />
             <p className="text-sm font-semibold text-gray-600">No reviews yet</p>
-            <p className="text-xs text-gray-400 mt-1">Connect your Google Business profile or log guest reviews to track them here.</p>
+            <p className="text-xs text-gray-400 mt-1">Log guest reviews here to track ratings and replies. Use "Add Review" to record one.</p>
           </div>
         )}
       </div>

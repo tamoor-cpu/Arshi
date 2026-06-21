@@ -139,11 +139,33 @@ router.post('/:locationId/clock-out', authenticate, requireLocationAccess, async
 // Get clock events for location (today by default)
 router.get('/:locationId/clock-events', authenticate, requireLocationAccess, async (req, res) => {
   try {
-    const { startDate, endDate, userId } = req.query;
+    const { startDate, endDate, userId, open } = req.query;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Determine which user we are scoping to (employees are locked to themselves).
+    const scopeUserId = req.user.role === 'EMPLOYEE' ? req.user.id : userId;
+
+    // ?open=true returns the user's most recent OPEN (no matching clock-out)
+    // event regardless of date. Used by ClockInButton so an overnight clock-in
+    // from a previous day still shows as "clocked in".
+    if (open === 'true') {
+      const latest = await prisma.clockEvent.findFirst({
+        where: {
+          locationId: req.params.locationId,
+          ...(scopeUserId && { userId: scopeUserId }),
+        },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        },
+        orderBy: { timestamp: 'desc' },
+      });
+
+      // Only return it if it is an open clock-in; otherwise the user is clocked out.
+      return res.json(latest && latest.eventType === 'clock_in' ? [latest] : []);
+    }
 
     const where = {
       locationId: req.params.locationId,
@@ -153,12 +175,7 @@ router.get('/:locationId/clock-events', authenticate, requireLocationAccess, asy
       },
     };
 
-    if (userId) where.userId = userId;
-
-    // Employees can only see their own
-    if (req.user.role === 'EMPLOYEE') {
-      where.userId = req.user.id;
-    }
+    if (scopeUserId) where.userId = scopeUserId;
 
     const events = await prisma.clockEvent.findMany({
       where,
@@ -167,6 +184,29 @@ router.get('/:locationId/clock-events', authenticate, requireLocationAccess, asy
       },
       orderBy: { timestamp: 'desc' },
     });
+
+    // When viewing the default (today) window scoped to a single user, an open
+    // clock-in from a previous day would be missed entirely. Ensure that user's
+    // latest event is reflected at the front so callers that read events[0]
+    // (e.g. ClockInButton) get the correct clock state across midnight.
+    // ClockInButton sends no userId, so fall back to the requesting user.
+    const midnightUserId = scopeUserId || req.user.id;
+    if (!startDate && !endDate && midnightUserId) {
+      const latest = await prisma.clockEvent.findFirst({
+        where: {
+          locationId: req.params.locationId,
+          userId: midnightUserId,
+        },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        },
+        orderBy: { timestamp: 'desc' },
+      });
+
+      if (latest && (events.length === 0 || events[0].id !== latest.id)) {
+        return res.json([latest, ...events]);
+      }
+    }
 
     res.json(events);
   } catch (err) {

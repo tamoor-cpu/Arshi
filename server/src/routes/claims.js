@@ -80,25 +80,28 @@ router.post('/:locationId/claims', authenticate, requireLocationAccess, validate
       },
     });
 
-    // Create alert for new damage claim
+    // The client submits the category as `complaintType`; use it for alert titles.
+    const claimLabel = claim.complaintType || complaintType || 'other';
+
+    // Create alert for new complaint
     await prisma.systemAlert.create({
       data: {
         locationId: req.params.locationId,
         alertType: 'equipment',
         severity: 'high',
-        title: `Damage Claim Filed: ${damageType}`,
+        title: `Complaint Filed: ${claimLabel}`,
         message: description.substring(0, 200),
       },
     });
 
     const io = req.app.get('io');
     io.to(`location:${req.params.locationId}`).emit('new-claim', claim);
-    req.audit('create', 'claim', claim.id, { damageType, description: description.substring(0, 100) });
+    req.audit('create', 'claim', claim.id, { complaintType: claimLabel, description: description.substring(0, 100) });
 
-    // Notify managers about new claim
+    // Notify managers about new complaint
     notifyLocationManagers({
       prisma, io, locationId: req.params.locationId,
-      type: 'claim', title: `New Damage Claim: ${damageType}`,
+      type: 'claim', title: `New Complaint: ${claimLabel}`,
       message: description.substring(0, 200),
       entityType: 'claim', entityId: claim.id,
     });

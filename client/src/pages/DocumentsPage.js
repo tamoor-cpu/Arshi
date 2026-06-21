@@ -27,8 +27,8 @@ export default function DocumentsPage() {
   const [roster, setRoster] = useState(null); // policy whose roster is open
   const [ackSummary, setAckSummary] = useState({}); // templateId -> { total, current, outdated, never }
 
-  const canManage = ['SUPER_ADMIN', 'REGIONAL_ADMIN'].includes(user.role);
-  const canViewRoster = ['SUPER_ADMIN', 'REGIONAL_ADMIN', 'SITE_MANAGER'].includes(user.role);
+  const canManage = ['SUPER_ADMIN', 'REGIONAL_ADMIN'].includes(user?.role);
+  const canViewRoster = ['SUPER_ADMIN', 'REGIONAL_ADMIN', 'SITE_MANAGER'].includes(user?.role);
 
   const load = useCallback(async () => {
     try {

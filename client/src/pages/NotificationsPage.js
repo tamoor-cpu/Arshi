@@ -132,6 +132,7 @@ export default function NotificationsPage() {
         equipment: '/equipment',
         inventory: '/inventory',
         training: '/training',
+        policy: `/documents?policy=${notification.entityId}`,
       };
       if (routes[notification.entityType]) {
         navigate(routes[notification.entityType]);

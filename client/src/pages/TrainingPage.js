@@ -40,6 +40,7 @@ export default function TrainingPage() {
   const [filterCat, setFilterCat] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [selectedModule, setSelectedModule] = useState(null);
+  const [acknowledged, setAcknowledged] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', category: 'safety', content: '', durationMinutes: '', isRequired: false, mediaUrls: [] });
   const [error, setError] = useState('');
 
@@ -71,6 +72,7 @@ export default function TrainingPage() {
   const fetchDetail = async (id) => {
     try {
       const { data } = await api.get(`/training/${id}`);
+      setAcknowledged(false);
       setSelectedModule(data);
     } catch (err) {
       console.error('Fetch module detail error:', err);
@@ -105,12 +107,15 @@ export default function TrainingPage() {
     }
   };
 
-  const completeTraining = async (moduleId, score) => {
+  const completeTraining = async (moduleId) => {
     try {
-      await api.patch(`/training/${moduleId}/complete`, { score });
+      // Record completion as an acknowledgement — omit score so no fabricated
+      // quiz result is stored (server marks status 'completed' when score is absent).
+      await api.patch(`/training/${moduleId}/complete`, {});
       fetchModules();
       fetchProgress();
       setSelectedModule(null);
+      setAcknowledged(false);
     } catch (err) {
       console.error('Complete training error:', err);
     }
@@ -242,13 +247,28 @@ export default function TrainingPage() {
               ) : null;
             })()}
 
-            <div className="flex gap-3 mb-4">
-              <button onClick={() => startTraining(selectedModule.id)} className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 flex items-center gap-1">
-                <Play className="w-4 h-4" /> Start
-              </button>
-              <button onClick={() => completeTraining(selectedModule.id, 100)} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 flex items-center gap-1">
-                <CheckCircle2 className="w-4 h-4" /> Mark Complete
-              </button>
+            <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(e) => setAcknowledged(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-brand-500 focus:ring-brand-400"
+                />
+                <span className="text-sm text-gray-700">I have read and understood this training</span>
+              </label>
+              <div className="flex gap-3 mt-3">
+                <button onClick={() => startTraining(selectedModule.id)} className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 flex items-center gap-1">
+                  <Play className="w-4 h-4" /> Start
+                </button>
+                <button
+                  onClick={() => completeTraining(selectedModule.id)}
+                  disabled={!acknowledged}
+                  className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Confirm Completion
+                </button>
+              </div>
             </div>
 
             {isAdmin && selectedModule.completions?.length > 0 && (

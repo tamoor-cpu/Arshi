@@ -15,6 +15,7 @@ export default function OrdersPage() {
   const { currentLocation, user } = useAuth();
   const toast = useToast();
   const [orders, setOrders] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [filter, setFilter] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [supplier, setSupplier] = useState('');
@@ -34,6 +35,17 @@ export default function OrdersPage() {
   }, [currentLocation, filter, toast]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
+
+  const fetchSuppliers = useCallback(async () => {
+    try {
+      const { data } = await api.get('/suppliers');
+      setSuppliers(data);
+    } catch {
+      // suppliers optional — fail silently
+    }
+  }, []);
+
+  useEffect(() => { fetchSuppliers(); }, [fetchSuppliers]);
 
   const addItemRow = () => setItems([...items, { name: '', qty: '', unit: 'each', cost: '' }]);
   const updateItem = (i, field, val) => setItems(items.map((it, idx) => idx === i ? { ...it, [field]: val } : it));
@@ -67,6 +79,16 @@ export default function OrdersPage() {
   const ordered = orders.filter((o) => o.status === 'ordered').length;
   const urgent = orders.filter((o) => o.status === 'pending' && o.autoCreated).length;
 
+  // Average fulfillment time (orderedAt → receivedAt) across received POs that have both timestamps
+  const fulfilled = orders.filter((o) => o.status === 'received' && o.orderedAt && o.receivedAt);
+  const avgFulfillment = fulfilled.length
+    ? (() => {
+        const totalDays = fulfilled.reduce((s, o) => s + (new Date(o.receivedAt) - new Date(o.orderedAt)) / 86400000, 0);
+        const d = totalDays / fulfilled.length;
+        return d < 1 ? `${Math.round(d * 24)}h` : `${d.toFixed(1)}d`;
+      })()
+    : '—';
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* Header */}
@@ -81,7 +103,7 @@ export default function OrdersPage() {
         {isManager && (
           <div className="flex items-center gap-2">
             <button onClick={() => setFilter('ordered')} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50">
-              <Check className="w-4 h-4" /> Receive
+              <Truck className="w-4 h-4" /> View Ordered
             </button>
             <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-4 py-2 bg-stock hover:opacity-90 text-white text-sm font-semibold rounded-lg shadow-sm">
               <Plus className="w-4 h-4" /> New
@@ -96,7 +118,7 @@ export default function OrdersPage() {
           { label: 'Pending', value: pending, dot: 'bg-amber-400', hint: 'Awaiting order' },
           { label: 'Ordered', value: ordered, dot: 'bg-blue-400', hint: 'On the way' },
           { label: 'Urgent', value: urgent, dot: 'bg-red-400', hint: urgent ? 'Auto-reorders' : 'None right now' },
-          { label: 'Avg. Fulfillment', value: '—', dot: 'bg-purple-400', hint: 'No data yet' },
+          { label: 'Avg. Fulfillment', value: avgFulfillment, dot: 'bg-purple-400', hint: fulfilled.length ? 'Ordered → received' : 'No received POs yet' },
         ].map((s) => (
           <div key={s.label} className="bg-white border border-gray-100 rounded-2xl p-4">
             <div className="flex items-center gap-2">
@@ -175,8 +197,11 @@ export default function OrdersPage() {
             <form onSubmit={createOrder} className="p-5 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Supplier</label>
-                <input value={supplier} onChange={(e) => setSupplier(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-stock/40 outline-none" placeholder="e.g. BlueWave Chemical" />
+                <select value={supplier} onChange={(e) => setSupplier(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-stock/40 outline-none">
+                  <option value="">No supplier</option>
+                  {suppliers.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-2">Items</label>

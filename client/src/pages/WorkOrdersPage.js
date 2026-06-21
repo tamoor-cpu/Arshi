@@ -84,7 +84,8 @@ export default function WorkOrdersPage() {
   const assignStart = orders.filter((o) => o.status === 'open').length;
   const inProgress = orders.filter((o) => o.status === 'in_progress').length;
   const completed = orders.filter((o) => o.status === 'completed').length;
-  const fixTimes = orders.filter((o) => o.completedAt && o.startedAt)
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 3600000;
+  const fixTimes = orders.filter((o) => o.completedAt && o.startedAt && new Date(o.completedAt).getTime() >= thirtyDaysAgo)
     .map((o) => (new Date(o.completedAt) - new Date(o.startedAt)) / 3600000);
   const avgFix = fixTimes.length ? `${(fixTimes.reduce((a, b) => a + b, 0) / fixTimes.length).toFixed(1)}h` : '—';
 
@@ -185,20 +186,20 @@ export default function WorkOrdersPage() {
                 {isManager && (
                   <div className="flex items-center gap-1.5 shrink-0">
                     {o.status === 'open' && (
-                      <select onChange={(e) => e.target.value && assign(o.id, e.target.value)} defaultValue=""
-                        className="text-xs px-2 py-1.5 border border-gray-200 rounded-lg bg-white text-gray-600">
-                        <option value="" disabled>Assign</option>
-                        {users.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName?.[0]}.</option>)}
-                      </select>
+                      <>
+                        <select value={o.assignedToId || ''} onChange={(e) => assign(o.id, e.target.value || null)}
+                          className="text-xs px-2 py-1.5 border border-gray-200 rounded-lg bg-white text-gray-600">
+                          <option value="">Assign</option>
+                          {users.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName?.[0]}.</option>)}
+                        </select>
+                        <button onClick={() => setStatus(o.id, 'in_progress')} className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-100"><Play className="w-3.5 h-3.5" /> Start</button>
+                      </>
                     )}
                     {o.status === 'in_progress' && (
                       <button onClick={() => setStatus(o.id, 'completed')} className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-50 text-purple-700 text-xs font-semibold rounded-lg hover:bg-purple-100"><CheckCircle2 className="w-3.5 h-3.5" /> Complete</button>
                     )}
                     {o.status === 'completed' && (
                       <button onClick={() => setStatus(o.id, 'approved')} className="flex items-center gap-1 px-2.5 py-1.5 bg-green-50 text-green-700 text-xs font-semibold rounded-lg hover:bg-green-100"><CheckCircle2 className="w-3.5 h-3.5" /> Approve</button>
-                    )}
-                    {o.status === 'open' && o.assignedToId == null && (
-                      <button onClick={() => setStatus(o.id, 'in_progress')} className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-100"><Play className="w-3.5 h-3.5" /> Start</button>
                     )}
                     <button onClick={() => remove(o.id)} className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50"><Trash2 className="w-4 h-4" /></button>
                   </div>

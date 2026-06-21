@@ -206,6 +206,61 @@ router.post('/:locationId/inventory/bulk/restock', authenticate, requireLocation
   }
 });
 
+// Cycle count — SET each item's currentStock to the physically counted value (not an increment)
+router.post('/:locationId/inventory/cycle-count', authenticate, requireLocationAccess, requireRole('SITE_MANAGER'), async (req, res) => {
+  try {
+    const { counts } = req.body; // [{ itemId, countedQuantity, notes }]
+    if (!counts?.length) return res.status(400).json({ error: 'Counts array required' });
+
+    // Load current stock so we can log the delta as an adjustment
+    const ids = counts.map((c) => c.itemId).filter(Boolean);
+    const existing = await prisma.inventoryItem.findMany({
+      where: { id: { in: ids }, locationId: req.params.locationId },
+      select: { id: true, currentStock: true },
+    });
+    const stockById = Object.fromEntries(existing.map((i) => [i.id, i.currentStock]));
+
+    const operations = [];
+    let counted = 0;
+    for (const { itemId, countedQuantity, notes } of counts) {
+      if (!itemId || countedQuantity == null || countedQuantity === '') continue;
+      if (!(itemId in stockById)) continue;
+      const target = parseFloat(countedQuantity);
+      if (Number.isNaN(target)) continue;
+      const delta = target - stockById[itemId];
+      counted += 1;
+      operations.push(
+        prisma.inventoryUsageLog.create({
+          data: {
+            itemId,
+            userId: req.user.id,
+            quantity: delta, // signed adjustment from counted value
+            type: 'adjustment',
+            notes: notes || `Cycle count: set to ${target}`,
+          },
+        }),
+        prisma.inventoryItem.update({
+          where: { id: itemId },
+          data: { currentStock: target }, // SET to absolute counted value
+        })
+      );
+    }
+
+    if (operations.length === 0) return res.status(400).json({ error: 'No valid counts provided' });
+
+    await prisma.$transaction(operations);
+
+    const io = req.app.get('io');
+    io.to(`location:${req.params.locationId}`).emit('inventory-cycle-counted', { count: counted });
+    req.audit('update', 'inventory_usage', null, { action: 'cycle_count', itemCount: counted });
+
+    res.json({ counted });
+  } catch (err) {
+    console.error('Cycle count error:', err);
+    res.status(500).json({ error: 'Failed to record cycle count' });
+  }
+});
+
 // Get usage history for item
 router.get('/:locationId/inventory/:id/history', authenticate, requireLocationAccess, async (req, res) => {
   try {

@@ -5,7 +5,7 @@ import { useToast } from '../context/ToastContext';
 import api from '../services/api';
 import {
   ClipboardList, Plus, X, Search, Pencil, Trash2, CheckCircle2,
-  HelpCircle, ChevronDown, ChevronRight, ListPlus, SlidersHorizontal,
+  ChevronDown, ChevronRight, ListPlus, SlidersHorizontal,
 } from 'lucide-react';
 
 const SECTIONS = [
@@ -31,10 +31,12 @@ export default function TasksPage() {
   const [form, setForm] = useState(blankForm());
   const [error, setError] = useState('');
   const [collapsed, setCollapsed] = useState(new Set());
+  const [listFilter, setListFilter] = useState('all'); // all | <listName> | none
+  const [showLists, setShowLists] = useState(false);
 
   function blankForm() {
     return { title: '', description: '', priority: 'medium', category: 'cleaning',
-      frequency: 'daily', shiftPeriod: 'opening', required: false, assignedToId: '', dueBy: '' };
+      frequency: 'daily', shiftPeriod: 'opening', required: false, assignedToId: '', dueBy: '', listName: '' };
   }
 
   const isManager = ['SUPER_ADMIN', 'REGIONAL_ADMIN', 'SITE_MANAGER'].includes(user.role);
@@ -77,6 +79,7 @@ export default function TasksPage() {
       title: t.title, description: t.description || '', priority: t.priority, category: t.category,
       frequency: t.frequency || 'once', shiftPeriod: t.shiftPeriod || 'opening',
       required: !!t.required, assignedToId: t.assignedToId || '', dueBy: t.dueBy ? t.dueBy.slice(0, 16) : '',
+      listName: t.listName || '',
     });
     setError(''); setShowForm(true);
   };
@@ -84,7 +87,7 @@ export default function TasksPage() {
   const saveTask = async (e) => {
     e.preventDefault();
     setError('');
-    const payload = { ...form, assignedToId: form.assignedToId || null, dueBy: form.dueBy || null };
+    const payload = { ...form, assignedToId: form.assignedToId || null, dueBy: form.dueBy || null, listName: form.listName.trim() || null };
     try {
       if (editing) { await api.patch(`/locations/${currentLocation.id}/tasks/${editing.id}`, payload); toast.success('Task updated'); }
       else { await api.post(`/locations/${currentLocation.id}/tasks`, payload); toast.success('Task added'); }
@@ -95,6 +98,11 @@ export default function TasksPage() {
   const completeTask = async (id) => {
     try { await api.patch(`/locations/${currentLocation.id}/tasks/${id}`, { status: 'completed' }); fetchTasks(); }
     catch { toast.error('Failed to complete task'); }
+  };
+
+  const assignToList = async (id, listName) => {
+    try { await api.patch(`/locations/${currentLocation.id}/tasks/${id}`, { listName: listName || null }); fetchTasks(); toast.success(listName ? `Moved to "${listName}"` : 'Removed from list'); }
+    catch { toast.error('Failed to update list'); }
   };
 
   const deleteTask = async (id) => {
@@ -116,9 +124,15 @@ export default function TasksPage() {
   const completed = tasks.filter((t) => t.status === 'completed');
   const totalToday = active.length + completed.length;
 
+  // Named lists derived from existing tasks' listName field
+  const lists = Array.from(new Set(tasks.map((t) => t.listName).filter(Boolean))).sort();
+  const listCount = (name) => active.filter((t) => (t.listName || null) === name).length;
+
   const matchesFilters = (t) => {
     if (assigneeFilter === 'mine' && t.assignedToId !== user.id) return false;
     if (assigneeFilter === 'unassigned' && t.assignedToId) return false;
+    if (listFilter === 'none' && t.listName) return false;
+    if (listFilter !== 'all' && listFilter !== 'none' && t.listName !== listFilter) return false;
     if (search && !(t.title.toLowerCase().includes(search.toLowerCase()) || (t.description || '').toLowerCase().includes(search.toLowerCase()))) return false;
     return true;
   };
@@ -137,15 +151,12 @@ export default function TasksPage() {
           <p className="text-sm text-gray-500 mt-1">Opening, midshift, and closing tasks for {currentLocation.name}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="p-2 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-600"><HelpCircle className="w-5 h-5" /></button>
+          <button onClick={() => setShowLists(true)} className="hidden sm:flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50">
+            <ListPlus className="w-4 h-4" /> Custom Lists
+          </button>
           {isManager && (
-            <button onClick={() => toast.info ? toast.info('Custom Lists coming soon') : toast.success('Custom Lists')} className="hidden sm:flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50">
-              <ListPlus className="w-4 h-4" /> Custom Lists
-            </button>
-          )}
-          {isManager && (
-            <button onClick={() => toast.info ? toast.info('Manage List coming soon') : toast.success('Manage List')} className="hidden sm:flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50">
-              <SlidersHorizontal className="w-4 h-4" /> Manage List
+            <button onClick={() => setShowLists(true)} className="hidden sm:flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50">
+              <SlidersHorizontal className="w-4 h-4" /> Manage Lists
             </button>
           )}
           {isManager && (
@@ -188,6 +199,19 @@ export default function TasksPage() {
           <button onClick={() => setAllCollapsed(true)} className="text-xs text-gray-400 hover:text-gray-600">Collapse all</button>
         </div>
       </div>
+
+      {/* List filter chips (only when named lists exist) */}
+      {lists.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap mb-3">
+          <span className="text-xs text-gray-400 mr-1">Lists:</span>
+          {[{ key: 'all', label: 'All lists' }, ...lists.map((l) => ({ key: l, label: l })), { key: 'none', label: 'No list' }].map((f) => (
+            <button key={f.key} onClick={() => setListFilter(f.key)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg ${listFilter === f.key ? 'bg-brand-50 text-brand-700' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative mb-4">
@@ -273,6 +297,60 @@ export default function TasksPage() {
         </div>
       )}
 
+      {/* Manage Lists modal */}
+      {showLists && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowLists(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div>
+                <p className="text-[11px] font-semibold tracking-wider text-brand-500">OPERATIONS</p>
+                <h3 className="text-lg font-bold text-gray-900">Custom Lists</h3>
+              </div>
+              <button onClick={() => setShowLists(false)} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-gray-500">Group active tasks into named lists. Filter the board by tapping a list below, or {isManager ? 'reassign tasks to a list here.' : 'open a task to change its list.'}</p>
+              {lists.length === 0 && active.filter((t) => !t.listName).length === 0 && (
+                <p className="text-sm text-gray-400">No tasks yet.</p>
+              )}
+              {[...lists, null].map((name) => {
+                const items = active.filter((t) => (t.listName || null) === (name || null));
+                if (items.length === 0) return null;
+                return (
+                  <div key={name || '__none__'} className="border border-gray-100 rounded-xl overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-gray-50">
+                      <div className="flex items-center gap-2">
+                        <ListPlus className="w-4 h-4 text-brand-500" />
+                        <span className="text-sm font-semibold text-gray-800">{name || 'No list'}</span>
+                        <span className="text-xs font-semibold text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{listCount(name || null)}</span>
+                      </div>
+                      <button onClick={() => { setListFilter(name || 'none'); setShowLists(false); }} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Filter</button>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                      {items.map((t) => (
+                        <div key={t.id} className="flex items-center gap-2 px-3 py-2">
+                          <span className="text-sm text-gray-700 flex-1 min-w-0 truncate">{t.title}</span>
+                          {isManager && (
+                            <select value={t.listName || ''} onChange={(e) => assignToList(t.id, e.target.value)}
+                              className="text-xs px-2 py-1 border border-gray-200 rounded-lg bg-white text-gray-600 shrink-0">
+                              <option value="">No list</option>
+                              {lists.map((l) => <option key={l} value={l}>{l}</option>)}
+                            </select>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {isManager && (
+                <p className="text-xs text-gray-400">Tip: create a new list by typing its name in the List field when adding or editing a task.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add/Edit modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
@@ -345,6 +423,14 @@ export default function TasksPage() {
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Due By</label>
                   <input type="datetime-local" value={form.dueBy} onChange={(e) => setForm({ ...form, dueBy: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">List (optional)</label>
+                  <input value={form.listName} onChange={(e) => setForm({ ...form, listName: e.target.value })} list="task-list-names"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" placeholder="e.g. Weekend Deep Clean" />
+                  <datalist id="task-list-names">
+                    {lists.map((l) => <option key={l} value={l} />)}
+                  </datalist>
                 </div>
               </div>
               <label className="flex items-center gap-2 text-sm text-gray-700">

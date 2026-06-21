@@ -33,7 +33,6 @@ import MultiLocationAnalyticsPage from './pages/MultiLocationAnalyticsPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import AIInsightsPage from './pages/AIInsightsPage';
 import ConsolePlaceholder from './pages/ConsolePlaceholder';
-import HistoryReportsPage from './pages/HistoryReportsPage';
 import ChemicalsPage from './pages/ChemicalsPage';
 import SDSLibraryPage from './pages/SDSLibraryPage';
 import GaugesPage from './pages/GaugesPage';
@@ -117,7 +116,7 @@ function AppRoutes() {
                   <Route path="/analytics" element={<AnalyticsPage />} />
                   <Route path="/suppliers" element={<SuppliersPage />} />
                   <Route path="/notifications" element={<NotificationsPage />} />
-                  <Route path="/reports" element={<HistoryReportsPage />} />
+                  <Route path="/reports" element={<ReportsPage />} />
                   <Route path="/multi-location-analytics" element={<MultiLocationAnalyticsPage />} />
                   <Route path="/integrations" element={<IntegrationsPage />} />
                   <Route path="/ai-insights" element={<AIInsightsPage />} />

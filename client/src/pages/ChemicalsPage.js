@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import api from '../services/api';
-import { Droplets, Plus, X, Pencil, Trash2, RefreshCw, AlertTriangle, FileText } from 'lucide-react';
+import { Droplets, Plus, X, Pencil, Trash2, RefreshCw, AlertTriangle, FileText, Beaker } from 'lucide-react';
 
 const TYPES = [
   { value: 'presoak', label: 'Pre-Soak' },
@@ -27,6 +27,9 @@ export default function ChemicalsPage() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(blank());
   const [error, setError] = useState('');
+  const [usageFor, setUsageFor] = useState(null);
+  const [usageAmount, setUsageAmount] = useState('');
+  const [usageNotes, setUsageNotes] = useState('');
 
   const isManager = ['SUPER_ADMIN', 'REGIONAL_ADMIN', 'SITE_MANAGER'].includes(user.role);
 
@@ -67,6 +70,18 @@ export default function ChemicalsPage() {
       await api.patch(`/locations/${currentLocation.id}/chemicals/${c.id}`, { currentLevel: c.tankCapacity || c.currentLevel, refill: true });
       fetchChemicals(); toast.success(`${c.name} refilled`);
     } catch { toast.error('Failed to refill'); }
+  };
+
+  const logUsage = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post(`/locations/${currentLocation.id}/chemicals/${usageFor.id}/usage`, {
+        amount: parseFloat(usageAmount),
+        notes: usageNotes || null,
+      });
+      setUsageFor(null); setUsageAmount(''); setUsageNotes('');
+      fetchChemicals(); toast.success(`Logged ${usageAmount} gal used from ${usageFor.name}`);
+    } catch (err) { toast.error(err.response?.data?.error || 'Failed to log usage'); }
   };
 
   const remove = async (id) => {
@@ -167,11 +182,16 @@ export default function ChemicalsPage() {
                 {low && <p className="flex items-center gap-1 text-[11px] text-red-500 mt-1.5"><AlertTriangle className="w-3 h-3" /> Below reorder point ({c.reorderPoint} gal)</p>}
               </div>
 
-              {isManager && (
-                <button onClick={() => refill(c)} className="mt-4 w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-chem/10 text-chem text-xs font-semibold rounded-lg hover:bg-chem/20">
-                  <RefreshCw className="w-3.5 h-3.5" /> Mark Refilled
+              <div className="mt-4 flex gap-2">
+                <button onClick={() => { setUsageFor(c); setUsageAmount(''); setUsageNotes(''); }} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-chem/10 text-chem text-xs font-semibold rounded-lg hover:bg-chem/20">
+                  <Beaker className="w-3.5 h-3.5" /> Log Usage
                 </button>
-              )}
+                {isManager && (
+                  <button onClick={() => refill(c)} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-chem/10 text-chem text-xs font-semibold rounded-lg hover:bg-chem/20">
+                    <RefreshCw className="w-3.5 h-3.5" /> Mark Refilled
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
@@ -244,6 +264,35 @@ export default function ChemicalsPage() {
               <div className="flex gap-2 pt-1">
                 <button type="submit" className="px-4 py-2 bg-chem hover:opacity-90 text-white text-sm font-semibold rounded-lg">{editing ? 'Save Changes' : 'Add Chemical'}</button>
                 <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-600 text-sm hover:bg-gray-100 rounded-lg">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Log Usage modal */}
+      {usageFor && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setUsageFor(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h3 className="text-base font-bold text-gray-900">Log Usage — {usageFor.name}</h3>
+              <button onClick={() => setUsageFor(null)} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={logUsage} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Amount Used (gal)</label>
+                <input type="number" step="0.1" min="0" value={usageAmount} onChange={(e) => setUsageAmount(e.target.value)} required autoFocus
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-chem/40 outline-none" />
+                <p className="text-[11px] text-gray-400 mt-1">Current level: {usageFor.currentLevel} gal. This will decrement the tank.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
+                <input value={usageNotes} onChange={(e) => setUsageNotes(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-chem/40 outline-none" />
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" className="px-4 py-2 bg-chem hover:opacity-90 text-white text-sm font-semibold rounded-lg">Log Usage</button>
+                <button type="button" onClick={() => setUsageFor(null)} className="px-4 py-2 text-gray-600 text-sm hover:bg-gray-100 rounded-lg">Cancel</button>
               </div>
             </form>
           </div>

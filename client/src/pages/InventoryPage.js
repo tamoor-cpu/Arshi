@@ -5,8 +5,8 @@ import api from '../services/api';
 import ExportButton from '../components/ExportButton';
 import PrintButton from '../components/common/PrintButton';
 import {
-  Package, Plus, X, AlertTriangle, Search, ArrowDown, ArrowUp,
-  History, Beaker, RefreshCw,
+  Package, Plus, X, AlertTriangle, ArrowDown, ArrowUp,
+  History, Beaker, RefreshCw, ClipboardCheck,
 } from 'lucide-react';
 
 const categoryOptions = [
@@ -35,11 +35,15 @@ export default function InventoryPage() {
   const [usageModal, setUsageModal] = useState(null);
   const [historyModal, setHistoryModal] = useState(null);
   const [historyLogs, setHistoryLogs] = useState([]);
-  const [form, setForm] = useState({ name: '', category: 'chemical', unit: 'gallons', currentStock: '', minStock: '', maxStock: '', costPerUnit: '' });
+  const [form, setForm] = useState({ name: '', category: 'chemical', unit: 'gallons', currentStock: '', minStock: '', maxStock: '', costPerUnit: '', supplierId: '' });
   const [usageForm, setUsageForm] = useState({ type: 'usage', quantity: '', notes: '' });
   const [error, setError] = useState('');
   const [showBulkRestock, setShowBulkRestock] = useState(false);
   const [bulkItems, setBulkItems] = useState({});
+  const [showCycleCount, setShowCycleCount] = useState(false);
+  const [countItems, setCountItems] = useState({});
+  const [suppliers, setSuppliers] = useState([]);
+  const [autoReorderCount, setAutoReorderCount] = useState(0);
 
   const toast = useToast();
   const isManager = ['SUPER_ADMIN', 'REGIONAL_ADMIN', 'SITE_MANAGER'].includes(user.role);
@@ -59,6 +63,29 @@ export default function InventoryPage() {
 
   useEffect(() => { fetchItems(); }, [fetchItems]);
 
+  const fetchSuppliers = useCallback(async () => {
+    try {
+      const { data } = await api.get('/suppliers');
+      setSuppliers(data);
+    } catch {
+      // suppliers are optional — fail silently
+    }
+  }, []);
+
+  const fetchAutoReorders = useCallback(async () => {
+    if (!currentLocation) return;
+    try {
+      const { data } = await api.get(`/locations/${currentLocation.id}/orders`);
+      const open = data.filter((o) => o.autoCreated && o.status !== 'received' && o.status !== 'cancelled').length;
+      setAutoReorderCount(open);
+    } catch {
+      setAutoReorderCount(0);
+    }
+  }, [currentLocation]);
+
+  useEffect(() => { fetchSuppliers(); }, [fetchSuppliers]);
+  useEffect(() => { fetchAutoReorders(); }, [fetchAutoReorders]);
+
   const addItem = async (e) => {
     e.preventDefault();
     setError('');
@@ -69,9 +96,10 @@ export default function InventoryPage() {
         minStock: parseFloat(form.minStock) || 0,
         maxStock: form.maxStock ? parseFloat(form.maxStock) : null,
         costPerUnit: form.costPerUnit ? parseFloat(form.costPerUnit) : null,
+        supplierId: form.supplierId || null,
       });
       setShowAdd(false);
-      setForm({ name: '', category: 'chemical', unit: 'gallons', currentStock: '', minStock: '', maxStock: '', costPerUnit: '' });
+      setForm({ name: '', category: 'chemical', unit: 'gallons', currentStock: '', minStock: '', maxStock: '', costPerUnit: '', supplierId: '' });
       fetchItems();
       toast.success('Item added successfully');
     } catch (err) {
@@ -122,6 +150,20 @@ export default function InventoryPage() {
     } catch (err) { toast.error('Failed to bulk restock'); }
   };
 
+  const handleCycleCount = async () => {
+    const counts = Object.entries(countItems)
+      .filter(([, v]) => v.countedQuantity !== '' && v.countedQuantity != null)
+      .map(([itemId, { countedQuantity, notes }]) => ({ itemId, countedQuantity: parseFloat(countedQuantity), notes }));
+    if (counts.length === 0) { toast.error('Enter counted quantities'); return; }
+    try {
+      await api.post(`/locations/${currentLocation.id}/inventory/cycle-count`, { counts });
+      setShowCycleCount(false);
+      setCountItems({});
+      fetchItems();
+      toast.success(`${counts.length} items counted`);
+    } catch (err) { toast.error('Failed to record cycle count'); }
+  };
+
   if (!currentLocation) return null;
 
   const lowCount = items.filter((i) => i.currentStock <= i.minStock).length;
@@ -141,8 +183,13 @@ export default function InventoryPage() {
           <PrintButton />
           <ExportButton endpoint={`/locations/${currentLocation.id}/export/inventory`} filename="inventory.csv" label="Export" />
           {isManager && (
+            <button onClick={() => { setShowCycleCount(true); setCountItems({}); }} className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50">
+              <ClipboardCheck className="w-4 h-4" /> Cycle Count
+            </button>
+          )}
+          {isManager && (
             <button onClick={() => { setShowBulkRestock(true); setBulkItems({}); }} className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50">
-              <RefreshCw className="w-4 h-4" /> Cycle Count
+              <RefreshCw className="w-4 h-4" /> Bulk Restock
             </button>
           )}
           {isManager && (
@@ -159,7 +206,7 @@ export default function InventoryPage() {
           { label: 'Total Items', value: items.length, dot: 'bg-stock' },
           { label: 'Low Stock', value: lowCount, dot: 'bg-red-400', hint: 'Below minimum' },
           { label: 'Inventory Value', value: '$' + items.reduce((sum, i) => sum + (i.currentStock || 0) * (i.costPerUnit || 0), 0).toLocaleString(undefined, { maximumFractionDigits: 0 }), dot: 'bg-green-400' },
-          { label: 'Auto Reorders', value: 0, dot: 'bg-purple-400', hint: 'Open orders' },
+          { label: 'Auto Reorders', value: autoReorderCount, dot: 'bg-purple-400', hint: 'Open auto-created POs' },
         ].map((s) => (
           <div key={s.label} className="bg-white border border-gray-100 rounded-2xl p-4">
             <div className="flex items-center gap-2">
@@ -184,7 +231,39 @@ export default function InventoryPage() {
         </button>
       </div>
 
-      {/* Add form */}
+      {/* Cycle Count Modal — SETS absolute counted quantities */}
+      {showCycleCount && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowCycleCount(false)}>
+          <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-semibold text-gray-900">Cycle Count</h3>
+              <button onClick={() => setShowCycleCount(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Enter the physical counted quantity for each item. This SETS the stock to the counted value and logs the difference as an adjustment. Leave blank to skip.</p>
+            <div className="space-y-2">
+              {items.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-200">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{item.name}</p>
+                    <p className="text-xs text-gray-500">System: {item.currentStock} {item.unit}</p>
+                  </div>
+                  <input
+                    type="number" min="0" step="0.1" placeholder="Counted"
+                    value={countItems[item.id]?.countedQuantity ?? ''}
+                    onChange={(e) => setCountItems({ ...countItems, [item.id]: { ...countItems[item.id], countedQuantity: e.target.value } })}
+                    className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-4 pt-4 border-t">
+              <button onClick={handleCycleCount} className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600">Save Counts</button>
+              <button onClick={() => setShowCycleCount(false)} className="px-4 py-2 text-gray-600 text-sm hover:bg-gray-100 rounded-lg">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bulk Restock Modal */}
       {showBulkRestock && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowBulkRestock(false)}>
@@ -255,6 +334,13 @@ export default function InventoryPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Cost Per Unit ($)</label>
               <input type="number" step="0.01" value={form.costPerUnit} onChange={(e) => setForm({ ...form, costPerUnit: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+              <select value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none">
+                <option value="">No supplier</option>
+                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
             </div>
             <div className="md:col-span-3 flex gap-2">
               <button type="submit" className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600">Add Item</button>

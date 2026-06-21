@@ -35,7 +35,7 @@ export default function ChatPage() {
     if (!socket) return;
 
     const handleNewMessage = (msg) => {
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
     };
 
     socket.on('new-message', handleNewMessage);
@@ -55,11 +55,16 @@ export default function ChatPage() {
 
     setSending(true);
     try {
-      await api.post(`/locations/${currentLocation.id}/messages`, {
+      const { data: sent } = await api.post(`/locations/${currentLocation.id}/messages`, {
         messageText: input.trim(),
         messageType: tab === 'announcements' ? 'announcement' : 'chat',
       });
       setInput('');
+      // Fallback: show the sent message immediately even if the socket echo
+      // never arrives. Dedupe by id so the socket round-trip doesn't double it.
+      if (sent && sent.id) {
+        setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
+      }
     } catch (err) {
       console.error('Send error:', err);
     } finally {

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useToast } from '../context/ToastContext';
 import api from '../services/api';
-import { Settings, MapPin, Building2, Save, Plus, CheckCircle2, Moon, Sun, Monitor, Palette } from 'lucide-react';
+import { Settings, MapPin, Building2, Save, Plus, CheckCircle2, Moon, Sun, Monitor, Palette, User, KeyRound } from 'lucide-react';
 
 export default function SettingsPage() {
   const { currentLocation, user, locations, loadUser } = useAuth();
   const { darkMode, toggleDarkMode } = useTheme();
+  const toast = useToast();
   const [locationForm, setLocationForm] = useState({
     name: '', address: '', city: '', state: '', zipCode: '',
     latitude: '', longitude: '', geofenceRadius: 150,
@@ -18,6 +20,19 @@ export default function SettingsPage() {
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', phone: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setProfileForm({
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        phone: user.phone || '',
+      });
+    }
+  }, [user]);
 
   useEffect(() => {
     if (currentLocation) {
@@ -41,8 +56,10 @@ export default function SettingsPage() {
       await api.patch(`/locations/${currentLocation.id}`, locationForm);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      toast.success('Location settings saved');
     } catch (err) {
       console.error('Save error:', err);
+      toast.error(err.response?.data?.error || 'Failed to save location settings');
     } finally {
       setSaving(false);
     }
@@ -55,8 +72,43 @@ export default function SettingsPage() {
       setShowNewLocation(false);
       setNewLocation({ name: '', address: '', city: '', state: '', zipCode: '', latitude: '', longitude: '', geofenceRadius: 150 });
       loadUser();
+      toast.success('Location created');
     } catch (err) {
       console.error('Create location error:', err);
+      toast.error(err.response?.data?.error || 'Failed to create location');
+    }
+  };
+
+  const saveProfile = async (e) => {
+    e.preventDefault();
+    setSavingProfile(true);
+    try {
+      await api.patch('/auth/me', {
+        firstName: profileForm.firstName,
+        lastName: profileForm.lastName,
+        phone: profileForm.phone,
+      });
+      if (loadUser) await loadUser();
+      toast.success('Profile updated');
+    } catch (err) {
+      console.error('Update profile error:', err);
+      toast.error(err.response?.data?.error || 'Failed to update profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const resetPassword = async () => {
+    if (!user?.email) return;
+    setResetting(true);
+    try {
+      await api.post('/auth/forgot-password', { email: user.email });
+      toast.success('Check your email');
+    } catch (err) {
+      console.error('Reset password error:', err);
+      toast.error(err.response?.data?.error || 'Failed to send reset email');
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -122,6 +174,42 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* My Profile */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+        <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+          <User className="w-5 h-5 text-blue-600" />
+          <h2 className="font-semibold text-gray-900 dark:text-white">My Profile</h2>
+        </div>
+        <form onSubmit={saveProfile} className="p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">First Name</label>
+              <input type="text" value={profileForm.firstName} onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Last Name</label>
+              <input type="text" value={profileForm.lastName} onChange={(e) => setProfileForm({ ...profileForm, lastName: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Phone</label>
+              <input type="tel" value={profileForm.phone} onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white" placeholder="(555) 555-5555" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+              <input type="email" value={user?.email || ''} disabled className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed" />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 dark:border-gray-700 pt-4">
+            <button type="button" onClick={resetPassword} disabled={resetting} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50">
+              <KeyRound className="w-4 h-4" /> {resetting ? 'Sending...' : 'Reset password'}
+            </button>
+            <button type="submit" disabled={savingProfile} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              <Save className="w-4 h-4" /> {savingProfile ? 'Saving...' : 'Save Profile'}
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* Current Location Settings */}

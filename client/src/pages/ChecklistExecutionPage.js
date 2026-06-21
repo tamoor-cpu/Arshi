@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+import FileUpload, { MediaThumbnails } from '../components/common/FileUpload';
 import {
   ArrowLeft,
   Camera,
@@ -20,33 +21,38 @@ export default function ChecklistExecutionPage() {
   const [checklist, setChecklist] = useState(null);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(null);
+  // Map of taskId -> attached photo URL for photo-required tasks
+  const [photos, setPhotos] = useState({});
 
   useEffect(() => {
     if (!currentLocation || !checklistId) return;
 
-    // We need to fetch the checklist data. Since we started it, let's fetch completed checklists
+    // Fetch this specific completed checklist by id
     api
-      .get(`/locations/${currentLocation.id}/checklists/completed`)
+      .get(`/locations/${currentLocation.id}/checklists/completed/${checklistId}`)
       .then(({ data }) => {
-        const found = data.find((c) => c.id === checklistId);
-        if (found) setChecklist(found);
+        if (data) setChecklist(data);
       })
+      .catch((err) => console.error('Fetch checklist error:', err))
       .finally(() => setLoading(false));
   }, [currentLocation, checklistId]);
 
   const completeTask = async (taskId, status) => {
     setCompleting(taskId);
+    const photoUrl = photos[taskId] || null;
     try {
       const { data } = await api.patch(
         `/locations/${currentLocation.id}/checklists/${checklistId}/tasks/${taskId}`,
-        { status, notes: '' }
+        { status, notes: '', photoUrl }
       );
 
       // Update local state
       setChecklist((prev) => {
         if (!prev) return prev;
         const updatedResults = prev.taskResults.map((tr) =>
-          tr.taskId === taskId ? { ...tr, status, completedAt: new Date().toISOString() } : tr
+          tr.taskId === taskId
+            ? { ...tr, status, photoUrl, completedAt: new Date().toISOString() }
+            : tr
         );
         return {
           ...prev,
@@ -55,11 +61,6 @@ export default function ChecklistExecutionPage() {
           completedAt: data.checklistComplete ? new Date().toISOString() : prev.completedAt,
         };
       });
-
-      if (data.checklistComplete) {
-        // Brief delay then show completion
-        setTimeout(() => {}, 500);
-      }
     } catch (err) {
       console.error('Complete task error:', err);
     } finally {
@@ -147,6 +148,8 @@ export default function ChecklistExecutionPage() {
           const isPassed = result?.status === 'passed';
           const isFailed = result?.status === 'failed';
           const isSkipped = result?.status === 'skipped';
+          const attachedPhoto = photos[task.id];
+          const needsPhoto = task.requiresPhoto && !attachedPhoto;
 
           return (
             <div
@@ -190,8 +193,38 @@ export default function ChecklistExecutionPage() {
                   )}
                   {task.requiresPhoto && !isDone && (
                     <span className="inline-flex items-center gap-1 text-xs text-orange-600 mt-1 ml-5">
-                      <Camera className="w-3 h-3" /> Photo required
+                      <Camera className="w-3 h-3" />{' '}
+                      {attachedPhoto ? 'Photo attached' : 'Photo required'}
                     </span>
+                  )}
+
+                  {/* Photo capture for photo-required tasks */}
+                  {task.requiresPhoto && !isDone && !isComplete && (
+                    <div className="ml-5 mt-2 max-w-sm">
+                      {attachedPhoto ? (
+                        <MediaThumbnails
+                          urls={[attachedPhoto]}
+                          onRemove={() =>
+                            setPhotos((prev) => {
+                              const next = { ...prev };
+                              delete next[task.id];
+                              return next;
+                            })
+                          }
+                        />
+                      ) : (
+                        <FileUpload
+                          accept="image/*"
+                          maxFiles={1}
+                          label="Attach photo"
+                          onUpload={(urls) => {
+                            if (urls && urls.length) {
+                              setPhotos((prev) => ({ ...prev, [task.id]: urls[0] }));
+                            }
+                          }}
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -200,9 +233,9 @@ export default function ChecklistExecutionPage() {
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => completeTask(task.id, 'passed')}
-                      disabled={completing === task.id}
-                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
-                      title="Pass"
+                      disabled={completing === task.id || needsPhoto}
+                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={needsPhoto ? 'Attach a photo to pass' : 'Pass'}
                     >
                       <Check className="w-5 h-5" />
                     </button>

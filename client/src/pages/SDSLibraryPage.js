@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import api from '../services/api';
 import {
-  FileText, Plus, X, Search, AlertTriangle, ShieldCheck, Sparkles,
+  FileText, Plus, X, Search, AlertTriangle, ShieldCheck,
   ExternalLink, Trash2, Archive,
 } from 'lucide-react';
 
@@ -138,31 +138,24 @@ export default function SDSLibraryPage() {
         </div>
       )}
 
-      {/* AI Safety Officer */}
+      {/* Quick Safety Reference */}
       <div className="rounded-2xl p-5 mb-4 bg-gradient-to-br from-emerald-900 to-teal-900 text-white">
         <div className="flex items-center gap-2.5 mb-3">
           <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center"><ShieldCheck className="w-5 h-5 text-emerald-300" /></div>
           <div>
-            <p className="text-sm font-bold">AI Safety Officer</p>
-            <p className="text-xs text-white/60">Chemical safety &amp; SDS assistance</p>
+            <p className="text-sm font-bold">Quick Safety Reference</p>
+            <p className="text-xs text-white/60">General chemical handling guidance — always defer to the product SDS</p>
           </div>
-        </div>
-        <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 mb-3">
-          <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-300 mb-1"><AlertTriangle className="w-3.5 h-3.5" /> IMPORTANT SAFETY DISCLAIMER</p>
-          <p className="text-[11px] text-white/70 leading-relaxed">
-            AI responses are for informational purposes only and may contain errors. Always refer to the official manufacturer SDS.
-            Call Poison Control 1-800-222-1222 for exposures, or 911 for medical emergencies.
-          </p>
         </div>
         {answer && (
           <div className="bg-white/5 border border-white/10 rounded-lg p-3 mb-3 text-sm text-white/90 leading-relaxed">{answer}</div>
         )}
         <div className="flex items-center gap-2">
           <input value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ask()}
-            placeholder="Ask a safety question (e.g. 'What PPE do I need for Ultra Clean?')"
+            placeholder="Look up a topic (e.g. 'PPE', 'spill', 'eye exposure')"
             className="flex-1 px-3 py-2.5 bg-white/10 border border-white/15 rounded-lg text-sm text-white placeholder:text-white/40 focus:ring-2 focus:ring-emerald-400/50 outline-none" />
           <button onClick={ask} className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg">
-            <Sparkles className="w-4 h-4" /> Ask AI
+            <Search className="w-4 h-4" /> Look Up
           </button>
         </div>
       </div>

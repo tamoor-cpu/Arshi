@@ -5,7 +5,7 @@ import api from '../services/api';
 import FileUpload, { MediaThumbnails } from '../components/common/FileUpload';
 import MediaGallery from '../components/common/MediaGallery';
 import {
-  MessageSquareWarning, Plus, X, HelpCircle, Link2, Camera, Calendar,
+  MessageSquareWarning, Plus, X, Camera, Calendar,
   User, AlertTriangle, CheckCircle2, Search, XCircle, Clock,
 } from 'lucide-react';
 
@@ -129,10 +129,6 @@ export default function ClaimsPage() {
           <p className="text-sm text-gray-500 mt-1">Log and resolve guest issues at {currentLocation.name}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="p-2 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-600"><HelpCircle className="w-5 h-5" /></button>
-          <button className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50">
-            <Link2 className="w-4 h-4" /> Customer form link
-          </button>
           <button onClick={() => { setForm(blankForm()); setError(''); setShowAdd(true); }}
             className="flex items-center gap-1.5 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-lg shadow-sm">
             <Plus className="w-4 h-4" /> New Complaint

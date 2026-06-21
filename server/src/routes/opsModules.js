@@ -1,6 +1,7 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { authenticate, requireRole, requireLocationAccess } = require('../middleware/auth');
+const { notifyLocationManagers } = require('../services/notify');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -76,8 +77,25 @@ router.post('/:locationId/gauges/:id/readings', authenticate, requireLocationAcc
     const reading = await prisma.gaugeReading.create({
       data: { gaugeId: req.params.id, value: v, recordedById: req.user.id, notes: notes || null },
     });
-    await prisma.gauge.update({ where: { id: req.params.id }, data: { lastValue: v, lastReadingAt: new Date() } });
+    const gauge = await prisma.gauge.update({ where: { id: req.params.id }, data: { lastValue: v, lastReadingAt: new Date() } });
     req.audit('create', 'gauge_reading', reading.id, { value: v });
+
+    // Alert managers when the reading falls outside the target range
+    const below = gauge.targetMin != null && v < gauge.targetMin;
+    const above = gauge.targetMax != null && v > gauge.targetMax;
+    if (below || above) {
+      const range = `${gauge.targetMin ?? '—'} – ${gauge.targetMax ?? '—'}${gauge.unit ? ` ${gauge.unit}` : ''}`;
+      const io = req.app.get('io');
+      io.to(`location:${req.params.locationId}`).emit('gauge-out-of-range', { gauge, value: v });
+      notifyLocationManagers({
+        prisma, io, locationId: req.params.locationId,
+        type: 'gauge',
+        title: `Gauge Out of Range: ${gauge.name}`,
+        message: `${gauge.name} read ${v}${gauge.unit ? ` ${gauge.unit}` : ''} (${below ? 'below' : 'above'} target range ${range}).`,
+        entityType: 'gauge', entityId: gauge.id,
+      });
+    }
+
     res.status(201).json(reading);
   } catch (err) {
     console.error('Log reading error:', err);

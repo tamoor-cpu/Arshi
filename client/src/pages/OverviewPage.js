@@ -50,7 +50,7 @@ export default function OverviewPage() {
   }, [currentLocation]);
 
   useEffect(() => { load(); }, [load]);
-  if (!currentLocation) return null;
+  if (!currentLocation || !user) return null;
 
   const openWO = d.workOrders.filter((w) => ['open', 'in_progress'].includes(w.status));
   const unassignedWO = d.workOrders.filter((w) => w.status === 'open' && !w.assignedToId);
