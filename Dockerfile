@@ -3,7 +3,9 @@
 FROM node:20 AS client
 WORKDIR /app/client
 COPY client/package*.json ./
-RUN npm ci --no-audit --no-fund
+# npm install (not ci) — tolerant of the lockfile being out of sync with the
+# image's npm version; reconciles instead of failing the build.
+RUN npm install --no-audit --no-fund
 COPY client/ ./
 ENV NODE_ENV=production
 ENV GENERATE_SOURCEMAP=false
