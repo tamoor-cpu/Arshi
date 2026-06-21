@@ -1,0 +1,26 @@
+{
+  "short_name": "ARSHI",
+  "name": "ARSHI - Car Wash Operations Platform",
+  "description": "Complete operations management for express car wash businesses",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#1e3a5f",
+  "background_color": "#f9fafb",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "categories": ["business", "productivity"]
+}

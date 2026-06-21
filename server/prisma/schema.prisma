@@ -1,0 +1,1174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// CORE: Multi-Tenant Organization
+// ============================================================
+
+model Tenant {
+  id               String   @id @default(uuid())
+  name             String
+  slug             String   @unique
+  logoUrl          String?
+  subscriptionTier String   @default("starter") @map("subscription_tier")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  locations Location[]
+  users     User[]
+  checklistTemplates ChecklistTemplate[]
+  suppliers  Supplier[]
+  customers  Customer[]
+  trainingModules TrainingModule[]
+  documentTemplates DocumentTemplate[]
+
+  @@map("tenants")
+}
+
+model Location {
+  id             String  @id @default(uuid())
+  tenantId       String  @map("tenant_id")
+  name           String
+  address        String?
+  city           String?
+  state          String?
+  zipCode        String? @map("zip_code")
+  latitude       Float?
+  longitude      Float?
+  geofenceRadius Int     @default(150) @map("geofence_radius") // meters
+  timezone       String  @default("America/Chicago")
+  isActive       Boolean @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  userLocations   UserLocation[]
+  shifts          Shift[]
+  clockEvents     ClockEvent[]
+  checklistTemplates ChecklistTemplate[]
+  completedChecklists CompletedChecklist[]
+  tunnelCycles    TunnelCycle[]
+  systemAlerts    SystemAlert[]
+  messages        Message[]
+  incidentReports IncidentReport[]
+  equipment       Equipment[]
+  inventoryItems  InventoryItem[]
+  damageClaims    DamageClaim[]
+  aiTasks         AITask[]
+  customerVisits  CustomerVisit[]
+  timeOffRequests TimeOffRequest[]
+  chemicals       Chemical[]
+  sdsEntries      SDSEntry[]
+  gauges          Gauge[]
+  sops            SOP[]
+  reviews         Review[]
+  purchaseOrders  PurchaseOrder[]
+  workOrders      WorkOrder[]
+  parts           Part[]
+
+  @@map("locations")
+}
+
+// ============================================================
+// USERS & ROLES
+// ============================================================
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  phone        String?
+  avatarUrl    String?  @map("avatar_url")
+  role         String   @default("EMPLOYEE")
+  hourlyRate   Float?   @map("hourly_rate")
+  position     String?  // job title
+  hireDate     DateTime? @map("hire_date")
+  isActive     Boolean  @default(true) @map("is_active")
+  archived     Boolean  @default(false)
+  archivedAt   DateTime? @map("archived_at")
+  onboardingCompletedAt DateTime? @map("onboarding_completed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  userLocations     UserLocation[]
+  clockEvents       ClockEvent[]
+  shiftAssignments  ShiftAssignment[]
+  completedChecklists CompletedChecklist[]
+  checklistTaskResults ChecklistTaskResult[]
+  messages          Message[]
+  incidentReports   IncidentReport[]
+  alertAcknowledgements SystemAlert[] @relation("AlertAcknowledger")
+  maintenanceLogs   MaintenanceLog[]
+  inventoryUsageLogs InventoryUsageLog[]
+  damageClaimsReported DamageClaim[]
+  complaintsAssigned DamageClaim[] @relation("ComplaintAssignee")
+  gaugeReadings     GaugeReading[] @relation("GaugeReader")
+  sopsAuthored      SOP[] @relation("SOPAuthor")
+  reviewsResponded  Review[] @relation("ReviewResponder")
+  purchaseOrders    PurchaseOrder[] @relation("POCreator")
+  workOrdersAssigned WorkOrder[] @relation("WorkOrderAssignee")
+  workOrdersCreated  WorkOrder[] @relation("WorkOrderCreator")
+  tasksAssigned     AITask[] @relation("TaskAssignee")
+  tasksCreated      AITask[] @relation("TaskCreator")
+  trainingCompletions TrainingCompletion[]
+  notifications     Notification[]
+  timeOffRequests   TimeOffRequest[] @relation("TimeOffRequester")
+  timeOffApprovals  TimeOffRequest[] @relation("TimeOffApprover")
+  onboardingTasks   OnboardingTask[]
+  employeeDocuments EmployeeDocument[]
+  writeUpsReceived  WriteUp[] @relation("WriteUpEmployee")
+  writeUpsIssued    WriteUp[] @relation("WriteUpIssuer")
+  signedDocuments   SignedDocument[]
+  authTokens        AuthToken[]
+
+  @@map("users")
+}
+
+// One-time tokens for email invites (set initial password) and password resets.
+// Only the SHA-256 hash of the token is stored.
+model AuthToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  type      String    // "invite" | "reset"
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("auth_tokens")
+}
+
+model UserLocation {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  locationId String   @map("location_id")
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  user     User     @relation(fields: [userId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([userId, locationId])
+  @@map("user_locations")
+}
+
+// ============================================================
+// SHIFT MANAGEMENT
+// ============================================================
+
+model Shift {
+  id          String   @id @default(uuid())
+  locationId  String   @map("location_id")
+  name        String   // e.g. "Morning", "Afternoon", "Closing"
+  startTime   String   @map("start_time") // "07:00"
+  endTime     String   @map("end_time")   // "15:00"
+  daysOfWeek  String   @default("1,2,3,4,5,6,0") @map("days_of_week") // comma-separated 0-6, Sunday=0
+  color       String   @default("#3B82F6")
+  minStaff    Int      @default(1)  @map("min_staff")
+  maxStaff    Int?     @map("max_staff")
+  breakMinutes Int     @default(0)  @map("break_minutes")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  location    Location          @relation(fields: [locationId], references: [id])
+  assignments ShiftAssignment[]
+
+  @@map("shifts")
+}
+
+model ShiftAssignment {
+  id         String   @id @default(uuid())
+  shiftId    String   @map("shift_id")
+  userId     String   @map("user_id")
+  date       DateTime // specific date of assignment
+  status     String   @default("scheduled") // scheduled, completed, no_show, swapped
+  notes      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  shift Shift @relation(fields: [shiftId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([shiftId, userId, date])
+  @@map("shift_assignments")
+}
+
+model ClockEvent {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  locationId String   @map("location_id")
+  eventType  String   @map("event_type") // "clock_in" | "clock_out"
+  timestamp  DateTime @default(now())
+  latitude   Float?
+  longitude  Float?
+  accuracy   Float?   // meters
+  isWithinGeofence Boolean @default(true) @map("is_within_geofence")
+  notes      String?
+
+  user     User     @relation(fields: [userId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@map("clock_events")
+}
+
+// ============================================================
+// CHECKLISTS & SOPs
+// ============================================================
+
+model ChecklistTemplate {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  locationId  String?  @map("location_id") // null = tenant-wide template
+  name        String
+  description String?
+  type        String   // "opening" | "closing" | "equipment" | "chemical" | "custom"
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id])
+  tasks    ChecklistTask[]
+  completedChecklists CompletedChecklist[]
+
+  @@map("checklist_templates")
+}
+
+model ChecklistTask {
+  id              String  @id @default(uuid())
+  templateId      String  @map("template_id")
+  sequence        Int
+  title           String
+  description     String?
+  requiresPhoto   Boolean @default(false) @map("requires_photo")
+  estimatedMinutes Int?   @map("estimated_minutes")
+  section         String? // group tasks into sections
+
+  template ChecklistTemplate    @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  results  ChecklistTaskResult[]
+
+  @@map("checklist_tasks")
+}
+
+model CompletedChecklist {
+  id         String    @id @default(uuid())
+  templateId String    @map("template_id")
+  locationId String    @map("location_id")
+  userId     String    @map("user_id")
+  startedAt  DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  status     String    @default("in_progress") // "in_progress" | "completed" | "abandoned"
+  notes      String?
+
+  template ChecklistTemplate    @relation(fields: [templateId], references: [id])
+  location Location             @relation(fields: [locationId], references: [id])
+  user     User                 @relation(fields: [userId], references: [id])
+  taskResults ChecklistTaskResult[]
+
+  @@map("completed_checklists")
+}
+
+model ChecklistTaskResult {
+  id                  String    @id @default(uuid())
+  completedChecklistId String   @map("completed_checklist_id")
+  taskId              String    @map("task_id")
+  userId              String    @map("user_id")
+  status              String    @default("pending") // "pending" | "passed" | "failed" | "skipped"
+  completedAt         DateTime? @map("completed_at")
+  photoUrl            String?   @map("photo_url")
+  notes               String?
+
+  completedChecklist CompletedChecklist @relation(fields: [completedChecklistId], references: [id], onDelete: Cascade)
+  task               ChecklistTask     @relation(fields: [taskId], references: [id])
+  user               User              @relation(fields: [userId], references: [id])
+
+  @@unique([completedChecklistId, taskId])
+  @@map("checklist_task_results")
+}
+
+// ============================================================
+// DASHBOARD & REAL-TIME
+// ============================================================
+
+model TunnelCycle {
+  id              String    @id @default(uuid())
+  locationId      String    @map("location_id")
+  startTime       DateTime  @default(now()) @map("start_time")
+  endTime         DateTime? @map("end_time")
+  cycleDuration   Int?      @map("cycle_duration") // seconds
+  status          String    @default("in_progress") // "in_progress" | "completed"
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@map("tunnel_cycles")
+}
+
+model SystemAlert {
+  id             String    @id @default(uuid())
+  locationId     String    @map("location_id")
+  alertType      String    @map("alert_type") // "equipment" | "chemical" | "maintenance" | "staffing" | "weather"
+  severity       String    // "critical" | "high" | "medium" | "low"
+  title          String
+  message        String
+  createdAt      DateTime  @default(now()) @map("created_at")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  acknowledgedById String? @map("acknowledged_by_id")
+
+  location       Location @relation(fields: [locationId], references: [id])
+  acknowledgedBy User?    @relation("AlertAcknowledger", fields: [acknowledgedById], references: [id])
+
+  @@map("system_alerts")
+}
+
+// ============================================================
+// COMMUNICATIONS
+// ============================================================
+
+model Message {
+  id          String   @id @default(uuid())
+  locationId  String   @map("location_id")
+  userId      String   @map("user_id")
+  messageText String   @map("message_text")
+  messageType String   @default("chat") @map("message_type") // "chat" | "announcement" | "alert"
+  threadId    String?  @map("thread_id") // self-reference for threads
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  location Location @relation(fields: [locationId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@map("messages")
+}
+
+model IncidentReport {
+  id           String   @id @default(uuid())
+  locationId   String   @map("location_id")
+  reporterId   String   @map("reporter_id")
+  incidentType String   @map("incident_type") // "damage" | "safety" | "equipment" | "customer"
+  title        String
+  description  String
+  photoUrls    String   @default("[]") @map("photo_urls") // JSON array
+  status       String   @default("open") // "open" | "investigating" | "resolved"
+  createdAt    DateTime @default(now()) @map("created_at")
+  resolvedAt   DateTime? @map("resolved_at")
+
+  location Location @relation(fields: [locationId], references: [id])
+  reporter User     @relation(fields: [reporterId], references: [id])
+
+  @@map("incident_reports")
+}
+
+// ============================================================
+// EQUIPMENT & MAINTENANCE
+// ============================================================
+
+model Equipment {
+  id             String    @id @default(uuid())
+  locationId     String    @map("location_id")
+  name           String
+  category       String    // "tunnel" | "dryer" | "pump" | "vacuum" | "chemical_system" | "conveyor" | "other"
+  area           String    @default("other") // "tunnel" | "backroom" | "electrical_room" | "vacuum_area" | "other"
+  serialNumber   String?   @map("serial_number")
+  manufacturer   String?
+  model          String?
+  installDate    DateTime? @map("install_date")
+  purchaseDate   DateTime? @map("purchase_date")
+  purchaseCost   Float?    @map("purchase_cost")
+  status         String    @default("operational") // "operational" | "needs_maintenance" | "out_of_service" | "retired"
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  location        Location         @relation(fields: [locationId], references: [id])
+  maintenanceLogs MaintenanceLog[]
+  workOrders      WorkOrder[]
+  partLinks       EquipmentPart[]
+
+  @@map("equipment")
+}
+
+model MaintenanceLog {
+  id            String    @id @default(uuid())
+  equipmentId   String    @map("equipment_id")
+  performedById String    @map("performed_by_id")
+  type          String    // "preventive" | "repair" | "inspection" | "emergency"
+  category      String    @default("maintenance") // "maintenance" | "repair"
+  description   String
+  cost          Float?
+  partsUsed     String    @default("[]") @map("parts_used") // JSON array
+  mediaUrls     String    @default("[]") @map("media_urls") // JSON array of uploaded file URLs
+  scheduledDate DateTime? @map("scheduled_date")
+  completedAt   DateTime? @map("completed_at")
+  status        String    @default("scheduled") // "scheduled" | "in_progress" | "completed"
+  notes         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+  performedBy User      @relation(fields: [performedById], references: [id])
+
+  @@map("maintenance_logs")
+}
+
+// ============================================================
+// INVENTORY & CHEMICALS
+// ============================================================
+
+model InventoryItem {
+  id           String   @id @default(uuid())
+  locationId   String   @map("location_id")
+  supplierId   String?  @map("supplier_id")
+  name         String
+  category     String   // "chemical" | "supply" | "part" | "cleaning"
+  unit         String   @default("gallons") // "gallons" | "liters" | "cases" | "each" | "lbs"
+  currentStock Float    @default(0) @map("current_stock")
+  minStock     Float    @default(0) @map("min_stock")
+  maxStock     Float?   @map("max_stock")
+  costPerUnit  Float?   @map("cost_per_unit")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  location  Location  @relation(fields: [locationId], references: [id])
+  supplier  Supplier? @relation(fields: [supplierId], references: [id])
+  usageLogs InventoryUsageLog[]
+  parts     Part[]
+
+  @@map("inventory_items")
+}
+
+model InventoryUsageLog {
+  id        String   @id @default(uuid())
+  itemId    String   @map("item_id")
+  userId    String   @map("user_id")
+  quantity  Float    // positive = added, negative = used
+  type      String   // "usage" | "restock" | "adjustment" | "waste"
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  item InventoryItem @relation(fields: [itemId], references: [id])
+  user User          @relation(fields: [userId], references: [id])
+
+  @@map("inventory_usage_logs")
+}
+
+model Supplier {
+  id           String  @id @default(uuid())
+  tenantId     String  @map("tenant_id")
+  name         String
+  contactEmail String? @map("contact_email")
+  phone        String?
+  website      String?
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  inventoryItems InventoryItem[]
+
+  @@map("suppliers")
+}
+
+// ============================================================
+// DAMAGE CLAIMS
+// ============================================================
+
+model DamageClaim {
+  id            String    @id @default(uuid())
+  locationId    String    @map("location_id")
+  customerId    String?   @map("customer_id")
+  reportedById  String    @map("reported_by_id")
+  assignedToId  String?   @map("assigned_to_id")
+  complaintType String    @default("unsatisfied") @map("complaint_type") // unsatisfied | damage | service | billing | refund | safety | other
+  severity      String    @default("medium") // low | medium | high
+  zone          String?   // tunnel | vacuum | payment | exterior | other
+  locationBay   String?   @map("location_bay")
+  customerName  String?   @map("customer_name")
+  customerPhone String?   @map("customer_phone")
+  incidentAt    DateTime? @map("incident_at")
+  vehicleMake   String?   @map("vehicle_make")
+  vehicleModel  String?   @map("vehicle_model")
+  vehicleYear   String?   @map("vehicle_year")
+  vehicleColor  String?   @map("vehicle_color")
+  licensePlate  String?   @map("license_plate")
+  description   String
+  damageType    String    @map("damage_type") // "scratch" | "dent" | "mirror" | "antenna" | "paint" | "other"
+  photoUrls     String    @default("[]") @map("photo_urls") // JSON array
+  status        String    @default("reported") // "reported" | "investigating" | "approved" | "denied" | "resolved"
+  estimatedCost Float?    @map("estimated_cost")
+  resolution    String?
+  resolvedAt    DateTime? @map("resolved_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  location   Location  @relation(fields: [locationId], references: [id])
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  reportedBy User      @relation(fields: [reportedById], references: [id])
+  assignedTo User?     @relation("ComplaintAssignee", fields: [assignedToId], references: [id])
+
+  @@map("damage_claims")
+}
+
+// ============================================================
+// CUSTOMER MANAGEMENT
+// ============================================================
+
+model Customer {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  firstName       String    @map("first_name")
+  lastName        String    @map("last_name")
+  email           String?
+  phone           String?
+  membershipType  String    @default("none") @map("membership_type") // "none" | "basic" | "premium" | "unlimited"
+  membershipStart DateTime? @map("membership_start")
+  membershipEnd   DateTime? @map("membership_end")
+  notes           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant       Tenant          @relation(fields: [tenantId], references: [id])
+  vehicles     Vehicle[]
+  visits       CustomerVisit[]
+  damageClaims DamageClaim[]
+
+  @@map("customers")
+}
+
+model Vehicle {
+  id           String  @id @default(uuid())
+  customerId   String  @map("customer_id")
+  make         String
+  model        String
+  year         String?
+  color        String?
+  licensePlate String? @map("license_plate")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("vehicles")
+}
+
+model CustomerVisit {
+  id         String   @id @default(uuid())
+  customerId String   @map("customer_id")
+  locationId String   @map("location_id")
+  washType   String?  @map("wash_type") // "basic" | "premium" | "ultimate" | "detail"
+  amount     Float?
+  visitDate  DateTime @default(now()) @map("visit_date")
+  notes      String?
+
+  customer Customer @relation(fields: [customerId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@map("customer_visits")
+}
+
+// ============================================================
+// TRAINING
+// ============================================================
+
+model TrainingModule {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  title           String
+  description     String?
+  category        String   // "safety" | "equipment" | "chemical" | "customer_service" | "operations"
+  content         String?  // markdown content
+  contentUrl      String?  @map("content_url")
+  mediaUrls       String   @default("[]") @map("media_urls") // JSON array of uploaded file URLs (images, videos, PDFs)
+  durationMinutes Int?     @map("duration_minutes")
+  isRequired      Boolean  @default(false) @map("is_required")
+  isActive        Boolean  @default(true) @map("is_active")
+  sequence        Int      @default(0)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id])
+  completions TrainingCompletion[]
+
+  @@map("training_modules")
+}
+
+model TrainingCompletion {
+  id          String    @id @default(uuid())
+  moduleId    String    @map("module_id")
+  userId      String    @map("user_id")
+  startedAt   DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  score       Int?      // percentage 0-100
+  status      String    @default("in_progress") // "in_progress" | "completed" | "failed"
+
+  module TrainingModule @relation(fields: [moduleId], references: [id])
+  user   User           @relation(fields: [userId], references: [id])
+
+  @@unique([moduleId, userId])
+  @@map("training_completions")
+}
+
+// ============================================================
+// AI TASK QUARTERBACK
+// ============================================================
+
+model AITask {
+  id           String    @id @default(uuid())
+  locationId   String    @map("location_id")
+  assignedToId String?   @map("assigned_to_id")
+  createdById  String?   @map("created_by_id")
+  title        String
+  description  String?
+  priority     String    @default("medium") // "critical" | "high" | "medium" | "low"
+  category     String    // "maintenance" | "cleaning" | "chemical" | "staffing" | "customer" | "other"
+  source       String    @default("manual") // "manual" | "ai_generated" | "alert" | "checklist"
+  status       String    @default("pending") // "pending" | "assigned" | "in_progress" | "completed" | "cancelled"
+  frequency    String    @default("once") // "daily" | "weekly" | "once"
+  shiftPeriod  String?   @map("shift_period") // "opening" | "midshift" | "closing"
+  required     Boolean   @default(false)
+  listName     String?   @map("list_name") // custom To-Do list grouping
+  dueBy        DateTime? @map("due_by")
+  completedAt  DateTime? @map("completed_at")
+  aiReason     String?   @map("ai_reason")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  location   Location @relation(fields: [locationId], references: [id])
+  assignedTo User?    @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  createdBy  User?    @relation("TaskCreator", fields: [createdById], references: [id])
+
+  @@map("ai_tasks")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  locationId    String?   @map("location_id")
+  type          String    // "alert" | "task" | "claim" | "training" | "inventory" | "equipment" | "system"
+  title         String
+  message       String
+  entityType    String?   @map("entity_type") // "task" | "claim" | "equipment" | "training" | "inventory"
+  entityId      String?   @map("entity_id")
+  isRead        Boolean   @default(false) @map("is_read")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  readAt        DateTime? @map("read_at")
+
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// ============================================================
+// SCHEDULED REPORTS
+// ============================================================
+
+model ScheduledReport {
+  id             String    @id @default(uuid())
+  tenantId       String    @map("tenant_id")
+  locationId     String?   @map("location_id") // null = all locations (multi-location report)
+  createdById    String    @map("created_by_id")
+  name           String
+  reportType     String    @map("report_type") // "operations_summary" | "inventory" | "equipment_health" | "training_compliance"
+  frequency      String    @default("weekly") // "daily" | "weekly" | "monthly" | "manual"
+  cronExpression String?   @map("cron_expression")
+  recipients     String    @default("[]") // JSON array of email addresses
+  isActive       Boolean   @default(true) @map("is_active")
+  lastRunAt      DateTime? @map("last_run_at")
+  nextRunAt      DateTime? @map("next_run_at")
+  config         String    @default("{}") // JSON config
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  runs ReportRun[]
+
+  @@index([tenantId])
+  @@map("scheduled_reports")
+}
+
+model ReportRun {
+  id                String    @id @default(uuid())
+  scheduledReportId String    @map("scheduled_report_id")
+  status            String    @default("pending") // "pending" | "generating" | "completed" | "failed"
+  filePath          String?   @map("file_path")
+  fileSize          Int?      @map("file_size")
+  errorMessage      String?   @map("error_message")
+  generatedAt       DateTime  @default(now()) @map("generated_at")
+  emailSentAt       DateTime? @map("email_sent_at")
+
+  scheduledReport ScheduledReport @relation(fields: [scheduledReportId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledReportId])
+  @@map("report_runs")
+}
+
+// ============================================================
+// DASHBOARD PREFERENCES
+// ============================================================
+
+model DashboardPreference {
+  id            String   @id @default(uuid())
+  userId        String   @unique @map("user_id")
+  hiddenWidgets String   @default("[]") @map("hidden_widgets") // JSON array of widget keys
+  widgetOrder   String   @default("[]") @map("widget_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("dashboard_preferences")
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  locationId String?  @map("location_id")
+  userId     String   @map("user_id")
+  action     String   // "create" | "update" | "delete" | "export" | "login" | "logout"
+  entity     String   // "equipment" | "inventory" | "task" | "claim" | "customer" | "shift" | "user" | "training" | "settings"
+  entityId   String?  @map("entity_id")
+  details    String?  // JSON string with change details
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// TIME-OFF REQUESTS
+// ============================================================
+
+model TimeOffRequest {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  locationId   String    @map("location_id")
+  startDate    DateTime  @map("start_date")
+  endDate      DateTime  @map("end_date")
+  type         String    // "vacation" | "sick" | "personal"
+  status       String    @default("pending") // "pending" | "approved" | "denied"
+  reason       String?
+  approvedById String?   @map("approved_by_id")
+  reviewedAt   DateTime? @map("reviewed_at")
+  reviewNotes  String?   @map("review_notes")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  user       User     @relation("TimeOffRequester", fields: [userId], references: [id])
+  approvedBy User?    @relation("TimeOffApprover", fields: [approvedById], references: [id])
+  location   Location @relation(fields: [locationId], references: [id])
+
+  @@index([userId, status])
+  @@index([locationId, status])
+  @@index([startDate, endDate])
+  @@map("time_off_requests")
+}
+
+// ============================================================
+// API KEYS
+// ============================================================
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  name        String
+  keyHash     String    @map("key_hash")
+  prefix      String
+  permissions String    @default("[]") // JSON array
+  lastUsedAt  DateTime? @map("last_used_at")
+  expiresAt   DateTime? @map("expires_at")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdById String    @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+// ============================================================
+// WEBHOOKS
+// ============================================================
+
+model WebhookEndpoint {
+  id             String    @id @default(uuid())
+  tenantId       String    @map("tenant_id")
+  url            String
+  events         String    @default("[]") // JSON array
+  signingSecret  String    @map("signing_secret")
+  isActive       Boolean   @default(true) @map("is_active")
+  description    String?
+  lastDeliveryAt DateTime? @map("last_delivery_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  deliveries WebhookDelivery[]
+
+  @@index([tenantId])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id                String    @id @default(uuid())
+  webhookEndpointId String    @map("webhook_endpoint_id")
+  event             String
+  payload           String
+  statusCode        Int?      @map("status_code")
+  responseBody      String?   @map("response_body")
+  attemptCount      Int       @default(0) @map("attempt_count")
+  nextRetryAt       DateTime? @map("next_retry_at")
+  deliveredAt       DateTime? @map("delivered_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  webhookEndpoint WebhookEndpoint @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+
+  @@index([webhookEndpointId])
+  @@index([nextRetryAt])
+  @@map("webhook_deliveries")
+}
+
+// ============================================================
+// CHEMCONSOLE — chemicals & safety data sheets
+// ============================================================
+
+model Chemical {
+  id            String    @id @default(uuid())
+  locationId    String    @map("location_id")
+  name          String
+  type          String    @default("other") // presoak | foam | detergent | drying_agent | tire_shine | sealant | other
+  tankCapacity  Float?    @map("tank_capacity") // gallons
+  currentLevel  Float     @default(0) @map("current_level") // gallons in tank
+  dilutionRatio String?   @map("dilution_ratio") // e.g. "1:128"
+  supplier      String?
+  costPerGallon Float?    @map("cost_per_gallon")
+  reorderPoint  Float?    @map("reorder_point") // gallons
+  sdsEntryId    String?   @map("sds_entry_id")
+  notes         String?
+  lastRefilledAt DateTime? @map("last_refilled_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  location Location  @relation(fields: [locationId], references: [id])
+  sdsEntry SDSEntry? @relation(fields: [sdsEntryId], references: [id])
+
+  @@index([locationId])
+  @@map("chemicals")
+}
+
+model SDSEntry {
+  id           String   @id @default(uuid())
+  locationId   String   @map("location_id")
+  chemicalName String   @map("chemical_name")
+  manufacturer String?
+  fileUrl      String?  @map("file_url") // uploaded SDS PDF
+  hazardClass  String?  @map("hazard_class")
+  signalWord   String?  @map("signal_word") // Danger | Warning | none
+  ppe          String   @default("[]") // JSON array of required PPE
+  archived     Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  location  Location   @relation(fields: [locationId], references: [id])
+  chemicals Chemical[]
+
+  @@index([locationId])
+  @@map("sds_entries")
+}
+
+// ============================================================
+// OPSCONSOLE — gauges & SOPs
+// ============================================================
+
+model Gauge {
+  id            String    @id @default(uuid())
+  locationId    String    @map("location_id")
+  name          String
+  category      String    @default("pressure") // pressure | temperature | chemical | ph | flow
+  unit          String    @default("") // psi | °F | pH | gpm
+  targetMin     Float?    @map("target_min")
+  targetMax     Float?    @map("target_max")
+  lastValue     Float?    @map("last_value")
+  lastReadingAt DateTime? @map("last_reading_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  location Location       @relation(fields: [locationId], references: [id])
+  readings GaugeReading[]
+
+  @@index([locationId])
+  @@map("gauges")
+}
+
+model GaugeReading {
+  id           String   @id @default(uuid())
+  gaugeId      String   @map("gauge_id")
+  value        Float
+  recordedById String?  @map("recorded_by_id")
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  gauge      Gauge @relation(fields: [gaugeId], references: [id], onDelete: Cascade)
+  recordedBy User? @relation("GaugeReader", fields: [recordedById], references: [id])
+
+  @@index([gaugeId])
+  @@map("gauge_readings")
+}
+
+model SOP {
+  id          String   @id @default(uuid())
+  locationId  String   @map("location_id")
+  title       String
+  category    String   @default("operations") // opening | midshift | closing | safety | operations
+  content     String   @default("")
+  version     Int      @default(1)
+  published   Boolean  @default(true)
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  location  Location @relation(fields: [locationId], references: [id])
+  createdBy User?    @relation("SOPAuthor", fields: [createdById], references: [id])
+
+  @@index([locationId])
+  @@map("sops")
+}
+
+model Review {
+  id           String    @id @default(uuid())
+  locationId   String    @map("location_id")
+  customerName String?   @map("customer_name")
+  rating       Int       @default(5) // 1-5
+  comment      String?
+  source       String    @default("google") // google | yelp | internal
+  replied      Boolean   @default(false)
+  replyText    String?   @map("reply_text")
+  repliedById  String?   @map("replied_by_id")
+  reviewedAt   DateTime  @default(now()) @map("reviewed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  location  Location @relation(fields: [locationId], references: [id])
+  repliedBy User?    @relation("ReviewResponder", fields: [repliedById], references: [id])
+
+  @@index([locationId])
+  @@map("reviews")
+}
+
+model PurchaseOrder {
+  id           String    @id @default(uuid())
+  locationId   String    @map("location_id")
+  poNumber     String    @map("po_number")
+  supplier     String?
+  status       String    @default("pending") // pending | ordered | received | cancelled
+  itemsJson    String    @default("[]") @map("items_json") // [{name, qty, unit, cost}]
+  totalCost    Float?    @map("total_cost")
+  autoCreated  Boolean   @default(false) @map("auto_created")
+  notes        String?
+  orderedAt    DateTime? @map("ordered_at")
+  receivedAt   DateTime? @map("received_at")
+  createdById  String?   @map("created_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  location  Location @relation(fields: [locationId], references: [id])
+  createdBy User?    @relation("POCreator", fields: [createdById], references: [id])
+
+  @@index([locationId])
+  @@map("purchase_orders")
+}
+
+model WorkOrder {
+  id            String    @id @default(uuid())
+  locationId    String    @map("location_id")
+  ticketNumber  String    @map("ticket_number")
+  title         String
+  description   String?
+  equipmentId   String?   @map("equipment_id")
+  equipmentName String?   @map("equipment_name")
+  zone          String?
+  priority      String    @default("normal") // low | normal | high | urgent
+  status        String    @default("open") // open | in_progress | completed | approved | cancelled
+  assignedToId  String?   @map("assigned_to_id")
+  createdById   String?   @map("created_by_id")
+  photoUrls     String    @default("[]") @map("photo_urls")
+  resolution    String?
+  startedAt     DateTime? @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  approvedAt    DateTime? @map("approved_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  location   Location   @relation(fields: [locationId], references: [id])
+  equipment  Equipment? @relation(fields: [equipmentId], references: [id])
+  assignedTo User?      @relation("WorkOrderAssignee", fields: [assignedToId], references: [id])
+  createdBy  User?      @relation("WorkOrderCreator", fields: [createdById], references: [id])
+
+  @@index([locationId, status])
+  @@map("work_orders")
+}
+
+// Replacement-parts catalog. A part can optionally be tied to a site
+// InventoryItem (for live stock) and linked to many pieces of equipment.
+model Part {
+  id              String   @id @default(uuid())
+  locationId      String   @map("location_id")
+  name            String
+  partNumber      String?  @map("part_number")
+  manufacturer    String?
+  specs           String?  // free-text specifications
+  orderUrl        String?  @map("order_url") // quick link to reorder
+  unitCost        Float?   @map("unit_cost")
+  inventoryItemId String?  @map("inventory_item_id") // ties to site inventory
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  location       Location        @relation(fields: [locationId], references: [id])
+  inventoryItem  InventoryItem?  @relation(fields: [inventoryItemId], references: [id])
+  equipmentLinks EquipmentPart[]
+
+  @@index([locationId])
+  @@map("parts")
+}
+
+// Many-to-many: the same part can be associated with many pieces of equipment.
+model EquipmentPart {
+  id               String   @id @default(uuid())
+  equipmentId      String   @map("equipment_id")
+  partId           String   @map("part_id")
+  quantityRequired Int      @default(1) @map("quantity_required")
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  part      Part      @relation(fields: [partId], references: [id], onDelete: Cascade)
+
+  @@unique([equipmentId, partId])
+  @@map("equipment_parts")
+}
+
+// ============================================================
+// EMPLOYEE LIFECYCLE — onboarding, documents, write-ups
+// ============================================================
+
+// Per-employee onboarding step. Generated when the user is created;
+// the new hire must complete all required steps before reaching the app.
+model OnboardingTask {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  key         String    // stable identifier for the step
+  category    String    // "profile" | "paperwork" | "policy" | "training"
+  title       String
+  description String?
+  required    Boolean   @default(true)
+  status      String    @default("pending") // "pending" | "completed"
+  completedAt DateTime? @map("completed_at")
+  data        String?   // JSON: captured form data / acknowledgement
+  sortOrder   Int       @default(0) @map("sort_order")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("onboarding_tasks")
+}
+
+// A document in an employee's file: onboarding paperwork, signed policy,
+// certification, or other uploaded record.
+model EmployeeDocument {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  category   String    @default("other") // "onboarding" | "policy" | "certification" | "other"
+  name       String
+  fileUrl    String?   @map("file_url")
+  status     String    @default("pending") // "pending" | "signed" | "completed"
+  signedAt   DateTime? @map("signed_at")
+  notes      String?
+  uploadedById String? @map("uploaded_by_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("employee_documents")
+}
+
+// Disciplinary write-up (or commendation) on an employee's record.
+model WriteUp {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  locationId     String?   @map("location_id")
+  type           String    @default("written") // "verbal" | "written" | "final" | "commendation"
+  title          String
+  description    String
+  issuedById     String?   @map("issued_by_id")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  employee User  @relation("WriteUpEmployee", fields: [userId], references: [id], onDelete: Cascade)
+  issuedBy User? @relation("WriteUpIssuer", fields: [issuedById], references: [id])
+
+  @@index([userId])
+  @@map("write_ups")
+}
+
+// Owner-managed document template: an uploaded fillable PDF form, or an
+// editable electronic policy/handbook. Revisable (version bumps on edit).
+model DocumentTemplate {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  name          String
+  type          String   @default("policy") // "fillable_form" | "policy"
+  category      String   @default("onboarding") // onboarding | policy | tax | hr | other
+  sourceFileUrl String?  @map("source_file_url") // uploaded PDF (for fillable_form)
+  content       String?  // editable electronic content (for policy)
+  fields        String   @default("[]") // JSON: fields the employee fills [{key,label,type}]
+  requireSignature Boolean @default(true) @map("require_signature")
+  assignOnOnboarding Boolean @default(false) @map("assign_on_onboarding")
+  version       Int      @default(1)
+  active        Boolean  @default(true)
+  createdById   String?  @map("created_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  signedDocuments SignedDocument[]
+
+  @@index([tenantId])
+  @@map("document_templates")
+}
+
+// A completed, signed document for a specific employee — the final signed PDF
+// is generated and saved into their employee file.
+model SignedDocument {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  templateId      String?  @map("template_id")
+  templateName    String   @map("template_name")
+  templateVersion Int      @default(1) @map("template_version")
+  type            String   @default("policy")
+  category        String   @default("onboarding")
+  fieldData       String   @default("{}") @map("field_data") // JSON of entered values
+  signatureUrl    String?  @map("signature_url") // PNG of the drawn signature
+  signedPdfUrl    String?  @map("signed_pdf_url") // generated final signed PDF
+  signedAt        DateTime @default(now()) @map("signed_at")
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template DocumentTemplate? @relation(fields: [templateId], references: [id])
+
+  @@index([userId])
+  @@map("signed_documents")
+}

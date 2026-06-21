@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Secrets / environment
+.env
+**/.env
+.env.local
+.env.*.local
+!.env.example
+!**/.env.example
+
+# Local database (SQLite dev)
+*.db
+*.db-journal
+server/prisma/dev.db
+server/prisma/*.db
+
+# Local file storage (use object storage in production)
+server/uploads/
+server/reports/
+
+# Build output
+client/build/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Claude / local tooling
+.claude/
