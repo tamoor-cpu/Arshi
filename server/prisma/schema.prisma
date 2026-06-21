@@ -388,6 +388,9 @@ model Equipment {
   purchaseCost   Float?    @map("purchase_cost")
   status         String    @default("operational") // "operational" | "needs_maintenance" | "out_of_service" | "retired"
   notes          String?
+  extractionSourceUrl String? @map("extraction_source_url") // the manual/spec file an AI extraction came from
+  extractionModel     String? @map("extraction_model")      // which model produced the draft
+  extractionJson      String? @map("extraction_json")       // full structured extraction (maintenance, parts) for later use
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
@@ -397,6 +400,23 @@ model Equipment {
   partLinks       EquipmentPart[]
 
   @@map("equipment")
+}
+
+// Cost + provenance log for every AI extraction call.
+model AiExtractionLog {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  userId      String?  @map("user_id")
+  recordType  String   @map("record_type") // "equipment" | "inventory" | "chemical"
+  sourceUrl   String?  @map("source_url")
+  model       String
+  inputTokens Int      @default(0) @map("input_tokens")
+  outputTokens Int     @default(0) @map("output_tokens")
+  ok          Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@map("ai_extraction_logs")
 }
 
 model MaintenanceLog {

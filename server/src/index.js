@@ -179,6 +179,7 @@ app.use('/api/v1/locations', timeoffRoutes);
 app.use('/api/v1/api-keys', apiKeyRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/locations', aiInsightsRoutes);
+app.use('/api/v1/ai', require('./routes/aiExtract'));
 
 // Socket.io connection handling
 io.on('connection', (socket) => {

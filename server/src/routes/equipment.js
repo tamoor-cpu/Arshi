@@ -39,7 +39,8 @@ router.get('/:locationId/equipment', authenticate, requireLocationAccess, async 
 // Add equipment
 router.post('/:locationId/equipment', authenticate, requireLocationAccess, requireRole('SITE_MANAGER'), validateEquipment, async (req, res) => {
   try {
-    const { name, category, area, serialNumber, manufacturer, model, installDate, purchaseDate, purchaseCost, notes } = req.body;
+    const { name, category, area, serialNumber, manufacturer, model, installDate, purchaseDate, purchaseCost, notes,
+      extractionSourceUrl, extractionModel, extractionJson } = req.body;
 
     if (!name || !category) {
       return res.status(400).json({ error: 'Name and category are required' });
@@ -58,6 +59,9 @@ router.post('/:locationId/equipment', authenticate, requireLocationAccess, requi
         purchaseDate: purchaseDate ? new Date(purchaseDate) : null,
         purchaseCost: purchaseCost != null && purchaseCost !== '' ? parseFloat(purchaseCost) : null,
         notes: notes || null,
+        extractionSourceUrl: extractionSourceUrl || null,
+        extractionModel: extractionModel || null,
+        extractionJson: extractionJson ? (typeof extractionJson === 'string' ? extractionJson : JSON.stringify(extractionJson)) : null,
       },
     });
 

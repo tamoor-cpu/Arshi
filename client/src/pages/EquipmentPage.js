@@ -10,8 +10,16 @@ import EquipmentDetailModal from '../components/equipment/EquipmentDetailModal';
 import {
   Wrench, Plus, X, AlertTriangle, CheckCircle2, XCircle,
   Clock, ChevronDown, ChevronUp, ChevronRight, Settings2, Calendar, Hammer, ClipboardCheck,
-  FileVideo, Image as ImageIcon,
+  FileVideo, Image as ImageIcon, Sparkles, Loader2,
 } from 'lucide-react';
+
+const MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
+const mimeFromUrl = (u) => MIME_BY_EXT[(u.split('.').pop() || '').toLowerCase()] || '';
+const ConfChip = ({ level }) => {
+  if (!level) return null;
+  const cls = level === 'high' ? 'bg-green-100 text-green-700' : level === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-orange-100 text-orange-700';
+  return <span className={`ml-1.5 align-middle text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${cls}`}>{level === 'high' ? 'AI ✓' : `AI · ${level}`}</span>;
+};
 
 const categories = [
   { value: '', label: 'All Categories' },
@@ -57,6 +65,10 @@ export default function EquipmentPage() {
   const [maintenanceLogs, setMaintenanceLogs] = useState([]);
   const [showMaintForm, setShowMaintForm] = useState(null);
   const [form, setForm] = useState({ name: '', category: 'tunnel', area: 'tunnel', serialNumber: '', manufacturer: '', model: '', purchaseDate: '', purchaseCost: '', notes: '' });
+  const [aiConfigured, setAiConfigured] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [draft, setDraft] = useState(null); // { confidence, maintenanceTasks, parts } from the last AI extract
+  const [reviewed, setReviewed] = useState(false);
   const [detailId, setDetailId] = useState(null); // open equipment file
   const [collapsedAreas, setCollapsedAreas] = useState(new Set());
   const [maintForm, setMaintForm] = useState({ type: 'preventive', description: '', cost: '', notes: '', mediaUrls: [] });
@@ -127,13 +139,60 @@ export default function EquipmentPage() {
     else { setExpandedId(id); fetchLogs(id); }
   };
 
+  // Is the AI extraction feature available (ANTHROPIC_API_KEY set server-side)?
+  useEffect(() => {
+    api.get('/ai/status').then((r) => setAiConfigured(!!r.data.configured)).catch(() => setAiConfigured(false));
+  }, []);
+
+  const resetForm = () => {
+    setForm({ name: '', category: 'tunnel', area: 'tunnel', serialNumber: '', manufacturer: '', model: '', purchaseDate: '', purchaseCost: '', notes: '' });
+    setDraft(null); setReviewed(false);
+  };
+
+  // Upload → Claude reads the manual/photo → pre-fill the form for review.
+  const handleExtract = async (urls) => {
+    const url = urls && urls[0];
+    if (!url) return;
+    const mimeType = mimeFromUrl(url);
+    if (!mimeType) { toast.error('Upload a PDF or an image (PNG/JPG).'); return; }
+    setExtracting(true); setError('');
+    try {
+      const { data } = await api.post('/ai/extract', { fileUrl: url, mimeType, recordType: 'equipment' });
+      const d = data.draft || {};
+      const validCat = ['tunnel', 'dryer', 'pump', 'vacuum', 'chemical_system', 'conveyor', 'other'];
+      setForm((f) => ({
+        ...f,
+        name: d.name || f.name,
+        category: validCat.includes(d.category) ? d.category : f.category,
+        manufacturer: d.manufacturer || f.manufacturer,
+        model: d.model || f.model,
+        serialNumber: d.serialNumber || f.serialNumber,
+        notes: d.specifications ? (f.notes ? `${f.notes}\n${d.specifications}` : d.specifications) : f.notes,
+        extractionSourceUrl: url,
+        extractionModel: data.model,
+        extractionJson: JSON.stringify(d),
+      }));
+      setDraft({ confidence: d.confidence || {}, maintenanceTasks: d.maintenanceTasks || [], parts: d.parts || [] });
+      setReviewed(false);
+      toast.success('AI filled the form — review the highlighted fields before saving.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Extraction failed. Enter the details manually.');
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  // Risky AI-extracted data (part numbers / maintenance intervals) must be verified before save.
+  const needsVerify = !!draft && ((draft.parts || []).some((p) => p.partNumber) || (draft.maintenanceTasks || []).some((m) => m.intervalDays != null));
+
   const addEquipment = async (e) => {
     e.preventDefault();
     setError('');
+    if (needsVerify && !reviewed) { setError('Please confirm you reviewed the AI-extracted part numbers and maintenance intervals.'); return; }
     try {
       await api.post(`/locations/${currentLocation.id}/equipment`, form);
       setShowAdd(false);
-      setForm({ name: '', category: 'tunnel', area: 'tunnel', serialNumber: '', manufacturer: '', model: '', purchaseDate: '', purchaseCost: '', notes: '' });
+      resetForm();
       fetchEquipment();
       toast.success('Equipment added successfully');
     } catch (err) {
@@ -291,14 +350,29 @@ export default function EquipmentPage() {
                 <button onClick={() => setShowAdd(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-4 h-4" /></button>
               </div>
               {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>}
+              {aiConfigured && (
+                <div className="mb-4 rounded-xl border border-brand-200 bg-brand-50/60 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles className="w-4 h-4 text-brand-600" />
+                    <p className="text-sm font-bold text-gray-900">Auto-fill from a manual</p>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3">Upload the equipment's PDF manual or spec sheet, or a photo of the nameplate — AI reads it and pre-fills the form. You review before saving.</p>
+                  {extracting ? (
+                    <div className="flex items-center gap-2 text-sm text-brand-700"><Loader2 className="w-4 h-4 animate-spin" /> Reading the document…</div>
+                  ) : (
+                    <FileUpload accept="image/*,.pdf" maxFiles={1} label="Upload manual / spec sheet / nameplate photo" onUpload={handleExtract} />
+                  )}
+                  {draft && !extracting && <p className="text-[11px] text-amber-700 mt-2 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Pre-filled below — verify part numbers &amp; maintenance intervals (they're the least reliable).</p>}
+                </div>
+              )}
               <form onSubmit={addEquipment} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *<ConfChip level={draft?.confidence?.name} /></label>
                   <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" required /></div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Area *</label>
                   <select value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none">
                     {AREAS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
                   </select></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Category *<ConfChip level={draft?.confidence?.category} /></label>
                   <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none">
                     {categories.filter((c) => c.value).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select></div>
@@ -306,17 +380,52 @@ export default function EquipmentPage() {
                   <input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" /></div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Purchase Cost ($)</label>
                   <input type="number" step="0.01" value={form.purchaseCost} onChange={(e) => setForm({ ...form, purchaseCost: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" /></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Serial Number<ConfChip level={draft?.confidence?.serialNumber} /></label>
                   <input type="text" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" /></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer</label>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer<ConfChip level={draft?.confidence?.manufacturer} /></label>
                   <input type="text" value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" /></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Model<ConfChip level={draft?.confidence?.model} /></label>
                   <input type="text" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" /></div>
-                <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <input type="text" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" /></div>
+                <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Notes / Specs</label>
+                  <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={form.notes && form.notes.includes('\n') ? 3 : 1} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-400 outline-none" /></div>
+
+                {draft && ((draft.maintenanceTasks || []).length > 0 || (draft.parts || []).length > 0) && (
+                  <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+                    {(draft.maintenanceTasks || []).length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold text-gray-700 mb-1 flex items-center gap-1"><ClipboardCheck className="w-3.5 h-3.5 text-brand-500" /> Maintenance schedule<ConfChip level={draft.confidence?.maintenanceTasks} /></p>
+                        <ul className="space-y-1">
+                          {draft.maintenanceTasks.map((m, i) => (
+                            <li key={i} className="text-xs text-gray-600 flex items-start gap-1.5"><span className="text-brand-400 mt-1">•</span>
+                              <span>{m.task}{m.intervalDays != null && <span className="text-gray-400"> · every {m.intervalDays} days</span>}{m.notes && <span className="text-gray-400"> — {m.notes}</span>}</span></li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {(draft.parts || []).length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold text-gray-700 mb-1 flex items-center gap-1"><Settings2 className="w-3.5 h-3.5 text-brand-500" /> Replacement parts<ConfChip level={draft.confidence?.parts} /></p>
+                        <ul className="space-y-1">
+                          {draft.parts.map((p, i) => (
+                            <li key={i} className="text-xs text-gray-600 flex items-start gap-1.5"><span className="text-brand-400 mt-1">•</span>
+                              <span>{p.name}{p.partNumber && <span className="font-mono text-gray-500"> ({p.partNumber})</span>}{p.notes && <span className="text-gray-400"> — {p.notes}</span>}</span></li>
+                          ))}
+                        </ul>
+                        <p className="text-[10px] text-gray-400 mt-1">Saved with this equipment for later use (auto-scheduling &amp; parts links).</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {needsVerify && (
+                  <label className="md:col-span-2 flex items-start gap-2 text-xs text-gray-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                    <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} className="mt-0.5 w-4 h-4 rounded text-brand-500" />
+                    I've reviewed the AI-extracted details — especially the part numbers and maintenance intervals — and confirm they're correct.
+                  </label>
+                )}
+
                 <div className="md:col-span-2 flex gap-2">
-                  <button type="submit" className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600">Add Equipment</button>
-                  <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 text-gray-600 text-sm hover:bg-gray-100 rounded-lg">Cancel</button>
+                  <button type="submit" disabled={needsVerify && !reviewed} className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed">Add Equipment</button>
+                  <button type="button" onClick={() => { setShowAdd(false); resetForm(); }} className="px-4 py-2 text-gray-600 text-sm hover:bg-gray-100 rounded-lg">Cancel</button>
                 </div>
               </form>
             </div>
